@@ -1,0 +1,33 @@
+generator client {
+    provider = "prisma-client"
+    output   = "../src/generated/prisma"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+enum AccountStatus {
+    PENDING_VERIFICATION
+    ACTIVE
+    LOCKED
+    SUSPENDED
+    DELETION_PENDING
+    DELETED
+}
+
+model User {
+    id String @id @default(uuid(7)) @db.Uuid
+
+    email           String @db.VarChar(320)
+    normalizedEmail String @unique @map("normalized_email") @db.VarChar(320)
+
+    status          AccountStatus @default(PENDING_VERIFICATION)
+    emailVerifiedAt DateTime?     @map("email_verified_at") @db.Timestamptz(3)
+
+    createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+    deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+    @@map("users")
+}

@@ -8,7 +8,12 @@
     "test": "pnpm -r --if-present test",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f db",
+    "db:generate": "pnpm --filter @pm/api db:generate",
+    "db:status": "pnpm --filter @pm/api db:status"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
