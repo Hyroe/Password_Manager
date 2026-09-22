@@ -19,8 +19,16 @@ enum AccountStatus {
 enum RegistrationStatus {
     PENDING
     EMAIL_VERIFIED
+    PASSKEY_REGISTERED
     COMPLETED
     EXPIRED
+}
+
+enum WebAuthnChallengePurpose {
+    REGISTER_PASSKEY
+    LOGIN
+    REAUTHENTICATE
+    ADD_PASSKEY
 }
 
 model User {
@@ -54,10 +62,60 @@ model RegistrationAttempt {
     registrationTokenHash      Bytes?    @map("registration_token_hash")
     registrationTokenExpiresAt DateTime? @map("registration_token_expires_at") @db.Timestamptz(3)
 
-    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-    updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+    createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+    webauthnUserId String?  @unique @map("webauthn_user_id") @db.VarChar(128)
+
+    bootstrapTokenHash      Bytes?    @map("bootstrap_token_hash")
+    bootstrapTokenExpiresAt DateTime? @map("bootstrap_token_expires_at") @db.Timestamptz(3)
+
+    webauthnChallenges WebAuthnChallenge[]
+    passkeys           RegistrationPasskey[]
 
     @@index([normalizedEmail])
     @@index([status, emailTokenExpiresAt])
     @@map("registration_attempts")
+}
+
+model WebAuthnChallenge {
+    id String @id @default(uuid(7)) @db.Uuid
+
+    registrationAttemptId String?              @map("registration_attempt_id") @db.Uuid
+    registrationAttempt   RegistrationAttempt? @relation(fields: [registrationAttemptId], references: [id], onDelete: Cascade)
+
+    purpose   WebAuthnChallengePurpose
+    challenge String                   @db.VarChar(512)
+
+    expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+    usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+
+    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+    @@index([registrationAttemptId, purpose])
+    @@index([expiresAt])
+    @@map("webauthn_challenges")
+}
+
+model RegistrationPasskey {
+    id String @id @default(uuid(7)) @db.Uuid
+
+    registrationAttemptId String              @map("registration_attempt_id") @db.Uuid
+    registrationAttempt   RegistrationAttempt @relation(fields: [registrationAttemptId], references: [id], onDelete: Cascade)
+
+    credentialId String @unique @map("credential_id") @db.Text
+    publicKey    Bytes  @map("public_key")
+    counter      BigInt @default(0)
+
+    webauthnUserId String @map("webauthn_user_id") @db.VarChar(128)
+
+    deviceType String  @map("device_type") @db.VarChar(32)
+    backedUp   Boolean @map("backed_up")
+
+    transports String[] @default([])
+
+    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+    @@unique([registrationAttemptId, webauthnUserId])
+    @@index([registrationAttemptId])
+    @@map("registration_passkeys")
 }

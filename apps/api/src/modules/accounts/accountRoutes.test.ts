@@ -21,6 +21,8 @@ describe('account registration', () => {
   beforeEach(async () => {
     verificationEmail = undefined;
 
+    await prisma.webAuthnChallenge.deleteMany();
+    await prisma.registrationPasskey.deleteMany();
     await prisma.registrationAttempt.deleteMany();
     await prisma.user.deleteMany();
   });
