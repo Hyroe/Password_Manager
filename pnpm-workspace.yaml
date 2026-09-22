@@ -2,6 +2,6 @@ packages:
   - apps/*
   - packages/*
 allowBuilds:
-  '@prisma/engines': set this to true or false
+  '@prisma/engines': true
   esbuild: true
-  prisma: set this to true or false
+  prisma: true

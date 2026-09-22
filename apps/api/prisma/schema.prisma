@@ -16,6 +16,13 @@ enum AccountStatus {
     DELETED
 }
 
+enum RegistrationStatus {
+    PENDING
+    EMAIL_VERIFIED
+    COMPLETED
+    EXPIRED
+}
+
 model User {
     id String @id @default(uuid(7)) @db.Uuid
 
@@ -30,4 +37,27 @@ model User {
     deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
 
     @@map("users")
+}
+
+model RegistrationAttempt {
+    id String @id @default(uuid(7)) @db.Uuid
+
+    email           String @db.VarChar(320)
+    normalizedEmail String @map("normalized_email") @db.VarChar(320)
+
+    status RegistrationStatus @default(PENDING)
+
+    emailTokenHash      Bytes     @map("email_token_hash")
+    emailTokenExpiresAt DateTime  @map("email_token_expires_at") @db.Timestamptz(3)
+    emailVerifiedAt     DateTime? @map("email_verified_at") @db.Timestamptz(3)
+
+    registrationTokenHash      Bytes?    @map("registration_token_hash")
+    registrationTokenExpiresAt DateTime? @map("registration_token_expires_at") @db.Timestamptz(3)
+
+    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    @@index([normalizedEmail])
+    @@index([status, emailTokenExpiresAt])
+    @@map("registration_attempts")
 }
