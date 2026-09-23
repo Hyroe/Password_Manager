@@ -15,3 +15,4 @@ apps/api/src/generated
 
 **/target/
 packages/crypto-core/pkg/
+packages/crypto-core/pkg-node/

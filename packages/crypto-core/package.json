@@ -7,6 +7,7 @@
     "typecheck": "cargo check",
     "test": "cargo test",
     "lint": "cargo clippy --all-targets -- -D warnings",
-    "build": "wasm-pack build --target web --release --out-dir pkg"
+    "build": "wasm-pack build --target web --release --out-dir pkg",
+    "smoke:wasm": "wasm-pack build --target nodejs --release --out-dir pkg-node && node scripts/wasm-smoke.mjs"
   }
 }
