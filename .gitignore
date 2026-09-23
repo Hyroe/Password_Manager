@@ -12,3 +12,6 @@ Thumbs.db
 .vscode/
 .idea/
 apps/api/src/generated
+
+**/target/
+packages/crypto-core/pkg/
