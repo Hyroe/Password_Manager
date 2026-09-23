@@ -5,9 +5,11 @@ use sha2::Sha256;
 pub const KEY_LENGTH: usize = 32;
 pub const KDF_SALT_LENGTH: usize = 16;
 
-const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
-const ARGON2_ITERATIONS: u32 = 2;
-const ARGON2_PARALLELISM: u32 = 1;
+pub const KDF_PROFILE_VERSION: u32 = 1;
+
+pub const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
+pub const ARGON2_ITERATIONS: u32 = 2;
+pub const ARGON2_PARALLELISM: u32 = 1;
 
 const MKEK_INFO: &[u8] = b"pm/v1/master-key-encryption-key";
 const RECOVERY_KEK_INFO: &[u8] = b"pm/v1/recovery-key-encryption-key";

@@ -11,6 +11,8 @@ export default tseslint.config(
   '**/node_modules/**',
   'apps/api/src/generated/**',
   'packages/crypto-core/pkg/**',
+  'packages/crypto-core/pkg-node/**',
+  'packages/crypto-core/scripts/**'
 ],
   },
   js.configs.recommended,

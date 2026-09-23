@@ -1,3 +1,4 @@
+mod bootstrap;
 mod envelope;
 mod kdf;
 
@@ -10,6 +11,8 @@ use kdf::{
     derive_master_password_key as derive_mpk_inner,
     derive_recovery_key_encryption_key as derive_recovery_kek_inner,
 };
+
+pub use bootstrap::{AccountBootstrapResult, create_account_bootstrap};
 
 const SECRET_LENGTH: usize = KEY_LENGTH;
 
