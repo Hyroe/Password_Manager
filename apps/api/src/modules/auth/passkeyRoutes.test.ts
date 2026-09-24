@@ -67,8 +67,19 @@ describe('passkey registration', () => {
   beforeEach(async () => {
     verificationEmail = undefined;
 
+    await prisma.vaultKeyEnvelope.deleteMany();
+    await prisma.vault.deleteMany();
+
+    await prisma.recoveryEnvelope.deleteMany();
+    await prisma.rootKeyEnvelope.deleteMany();
+    await prisma.userCryptoProfile.deleteMany();
+
+    await prisma.passkeyCredential.deleteMany();
+
+    await prisma.accountBootstrapContext.deleteMany();
     await prisma.webAuthnChallenge.deleteMany();
     await prisma.registrationPasskey.deleteMany();
+
     await prisma.registrationAttempt.deleteMany();
     await prisma.user.deleteMany();
   });

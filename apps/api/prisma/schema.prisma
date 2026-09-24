@@ -1,121 +1,285 @@
 generator client {
-    provider = "prisma-client"
-    output   = "../src/generated/prisma"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
-    provider = "postgresql"
+  provider = "postgresql"
 }
 
 enum AccountStatus {
-    PENDING_VERIFICATION
-    ACTIVE
-    LOCKED
-    SUSPENDED
-    DELETION_PENDING
-    DELETED
+  PENDING_VERIFICATION
+  ACTIVE
+  LOCKED
+  SUSPENDED
+  DELETION_PENDING
+  DELETED
 }
 
 enum RegistrationStatus {
-    PENDING
-    EMAIL_VERIFIED
-    PASSKEY_REGISTERED
-    COMPLETED
-    EXPIRED
+  PENDING
+  EMAIL_VERIFIED
+  PASSKEY_REGISTERED
+  COMPLETED
+  EXPIRED
 }
 
 enum WebAuthnChallengePurpose {
-    REGISTER_PASSKEY
-    LOGIN
-    REAUTHENTICATE
-    ADD_PASSKEY
+  REGISTER_PASSKEY
+  LOGIN
+  REAUTHENTICATE
+  ADD_PASSKEY
+}
+
+enum KdfAlgorithm {
+  ARGON2ID
+}
+
+enum VaultKind {
+  PERSONAL
 }
 
 model User {
-    id String @id @default(uuid(7)) @db.Uuid
+  id String @id @default(uuid(7)) @db.Uuid
 
-    email           String @db.VarChar(320)
-    normalizedEmail String @unique @map("normalized_email") @db.VarChar(320)
+  email           String @db.VarChar(320)
+  normalizedEmail String @unique @map("normalized_email") @db.VarChar(320)
 
-    status          AccountStatus @default(PENDING_VERIFICATION)
-    emailVerifiedAt DateTime?     @map("email_verified_at") @db.Timestamptz(3)
+  status          AccountStatus @default(PENDING_VERIFICATION)
+  emailVerifiedAt DateTime?     @map("email_verified_at") @db.Timestamptz(3)
 
-    createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-    updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
-    deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
+  webauthnUserId String    @unique @map("webauthn_user_id") @db.VarChar(128)
 
-    @@map("users")
+  completedRegistration RegistrationAttempt? @relation("CompletedRegistration")
+
+  passkeys      PasskeyCredential[]
+  cryptoProfile UserCryptoProfile?
+  vaults        Vault[]
+
+  @@map("users")
+}
+
+model PasskeyCredential {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  credentialId String @unique @map("credential_id") @db.Text
+  publicKey    Bytes  @map("public_key")
+
+  counter BigInt @default(0)
+
+  deviceType String  @map("device_type") @db.VarChar(32)
+  backedUp   Boolean @map("backed_up")
+
+  transports String[] @default([])
+
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("passkey_credentials")
+}
+
+model UserCryptoProfile {
+  id String @id @db.Uuid
+
+  userId String @unique @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  protocolVersion Int @map("protocol_version")
+
+  kdfAlgorithm      KdfAlgorithm
+  kdfProfileVersion Int          @map("kdf_profile_version")
+
+  argon2MemoryKib   Int @map("argon2_memory_kib")
+  argon2Iterations  Int @map("argon2_iterations")
+  argon2Parallelism Int @map("argon2_parallelism")
+
+  kdfSalt Bytes @map("kdf_salt")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  rootKeyEnvelopes  RootKeyEnvelope[]
+  recoveryEnvelopes RecoveryEnvelope[]
+
+  @@map("user_crypto_profiles")
+}
+
+model RootKeyEnvelope {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  cryptoProfileId String            @map("crypto_profile_id") @db.Uuid
+  cryptoProfile   UserCryptoProfile @relation(fields: [cryptoProfileId], references: [id], onDelete: Cascade)
+
+  keyVersion      Int @map("key_version")
+  envelopeVersion Int @map("envelope_version")
+
+  encryptedKey Bytes @map("encrypted_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([cryptoProfileId, keyVersion])
+  @@map("root_key_envelopes")
+}
+
+model RecoveryEnvelope {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  cryptoProfileId String            @map("crypto_profile_id") @db.Uuid
+  cryptoProfile   UserCryptoProfile @relation(fields: [cryptoProfileId], references: [id], onDelete: Cascade)
+
+  recoveryVersion Int @map("recovery_version")
+  rootKeyVersion  Int @map("root_key_version")
+
+  envelopeVersion Int @map("envelope_version")
+
+  encryptedKey Bytes @map("encrypted_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([cryptoProfileId, recoveryVersion])
+  @@map("recovery_envelopes")
+}
+
+model Vault {
+  id String @id @db.Uuid
+
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  kind VaultKind @default(PERSONAL)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  keyEnvelopes VaultKeyEnvelope[]
+
+  @@index([userId])
+  @@map("vaults")
+}
+
+model VaultKeyEnvelope {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  vaultId String @map("vault_id") @db.Uuid
+  vault   Vault  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  vaultKeyVersion Int @map("vault_key_version")
+  rootKeyVersion  Int @map("root_key_version")
+
+  envelopeVersion Int @map("envelope_version")
+
+  encryptedKey Bytes @map("encrypted_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([vaultId, vaultKeyVersion])
+  @@map("vault_key_envelopes")
 }
 
 model RegistrationAttempt {
-    id String @id @default(uuid(7)) @db.Uuid
+  id String @id @default(uuid(7)) @db.Uuid
 
-    email           String @db.VarChar(320)
-    normalizedEmail String @map("normalized_email") @db.VarChar(320)
+  email           String @db.VarChar(320)
+  normalizedEmail String @map("normalized_email") @db.VarChar(320)
 
-    status RegistrationStatus @default(PENDING)
+  status RegistrationStatus @default(PENDING)
 
-    emailTokenHash      Bytes     @map("email_token_hash")
-    emailTokenExpiresAt DateTime  @map("email_token_expires_at") @db.Timestamptz(3)
-    emailVerifiedAt     DateTime? @map("email_verified_at") @db.Timestamptz(3)
+  emailTokenHash      Bytes     @map("email_token_hash")
+  emailTokenExpiresAt DateTime  @map("email_token_expires_at") @db.Timestamptz(3)
+  emailVerifiedAt     DateTime? @map("email_verified_at") @db.Timestamptz(3)
 
-    registrationTokenHash      Bytes?    @map("registration_token_hash")
-    registrationTokenExpiresAt DateTime? @map("registration_token_expires_at") @db.Timestamptz(3)
+  registrationTokenHash      Bytes?    @map("registration_token_hash")
+  registrationTokenExpiresAt DateTime? @map("registration_token_expires_at") @db.Timestamptz(3)
 
-    createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-    updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
-    webauthnUserId String?  @unique @map("webauthn_user_id") @db.VarChar(128)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  webauthnUserId String?  @unique @map("webauthn_user_id") @db.VarChar(128)
 
-    bootstrapTokenHash      Bytes?    @map("bootstrap_token_hash")
-    bootstrapTokenExpiresAt DateTime? @map("bootstrap_token_expires_at") @db.Timestamptz(3)
+  bootstrapTokenHash      Bytes?    @map("bootstrap_token_hash")
+  bootstrapTokenExpiresAt DateTime? @map("bootstrap_token_expires_at") @db.Timestamptz(3)
 
-    webauthnChallenges WebAuthnChallenge[]
-    passkeys           RegistrationPasskey[]
+  webauthnChallenges WebAuthnChallenge[]
+  passkeys           RegistrationPasskey[]
 
-    @@index([normalizedEmail])
-    @@index([status, emailTokenExpiresAt])
-    @@map("registration_attempts")
+  bootstrapContext AccountBootstrapContext?
+
+  completedUserId String? @unique @map("completed_user_id") @db.Uuid
+  completedUser   User?   @relation("CompletedRegistration", fields: [completedUserId], references: [id], onDelete: SetNull)
+
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+
+  @@index([normalizedEmail])
+  @@index([status, emailTokenExpiresAt])
+  @@map("registration_attempts")
+}
+
+model AccountBootstrapContext {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  registrationAttemptId String              @unique @map("registration_attempt_id") @db.Uuid
+  registrationAttempt   RegistrationAttempt @relation(fields: [registrationAttemptId], references: [id], onDelete: Cascade)
+
+  cryptoProfileId String @default(uuid(7)) @map("crypto_profile_id") @db.Uuid
+  personalVaultId String @default(uuid(7)) @map("personal_vault_id") @db.Uuid
+
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@map("account_bootstrap_contexts")
 }
 
 model WebAuthnChallenge {
-    id String @id @default(uuid(7)) @db.Uuid
+  id String @id @default(uuid(7)) @db.Uuid
 
-    registrationAttemptId String?              @map("registration_attempt_id") @db.Uuid
-    registrationAttempt   RegistrationAttempt? @relation(fields: [registrationAttemptId], references: [id], onDelete: Cascade)
+  registrationAttemptId String?              @map("registration_attempt_id") @db.Uuid
+  registrationAttempt   RegistrationAttempt? @relation(fields: [registrationAttemptId], references: [id], onDelete: Cascade)
 
-    purpose   WebAuthnChallengePurpose
-    challenge String                   @db.VarChar(512)
+  purpose   WebAuthnChallengePurpose
+  challenge String                   @db.VarChar(512)
 
-    expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
-    usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
 
-    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-    @@index([registrationAttemptId, purpose])
-    @@index([expiresAt])
-    @@map("webauthn_challenges")
+  @@index([registrationAttemptId, purpose])
+  @@index([expiresAt])
+  @@map("webauthn_challenges")
 }
 
 model RegistrationPasskey {
-    id String @id @default(uuid(7)) @db.Uuid
+  id String @id @default(uuid(7)) @db.Uuid
 
-    registrationAttemptId String              @map("registration_attempt_id") @db.Uuid
-    registrationAttempt   RegistrationAttempt @relation(fields: [registrationAttemptId], references: [id], onDelete: Cascade)
+  registrationAttemptId String              @map("registration_attempt_id") @db.Uuid
+  registrationAttempt   RegistrationAttempt @relation(fields: [registrationAttemptId], references: [id], onDelete: Cascade)
 
-    credentialId String @unique @map("credential_id") @db.Text
-    publicKey    Bytes  @map("public_key")
-    counter      BigInt @default(0)
+  credentialId String @unique @map("credential_id") @db.Text
+  publicKey    Bytes  @map("public_key")
+  counter      BigInt @default(0)
 
-    webauthnUserId String @map("webauthn_user_id") @db.VarChar(128)
+  webauthnUserId String @map("webauthn_user_id") @db.VarChar(128)
 
-    deviceType String  @map("device_type") @db.VarChar(32)
-    backedUp   Boolean @map("backed_up")
+  deviceType String  @map("device_type") @db.VarChar(32)
+  backedUp   Boolean @map("backed_up")
 
-    transports String[] @default([])
+  transports String[] @default([])
 
-    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-    @@unique([registrationAttemptId, webauthnUserId])
-    @@index([registrationAttemptId])
-    @@map("registration_passkeys")
+  @@unique([registrationAttemptId, webauthnUserId])
+  @@index([registrationAttemptId])
+  @@map("registration_passkeys")
 }
