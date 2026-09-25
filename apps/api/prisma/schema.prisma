@@ -58,6 +58,7 @@ model User {
   passkeys      PasskeyCredential[]
   cryptoProfile UserCryptoProfile?
   vaults        Vault[]
+  sessions      Session[]
 
   @@map("users")
 }
@@ -282,4 +283,26 @@ model RegistrationPasskey {
   @@unique([registrationAttemptId, webauthnUserId])
   @@index([registrationAttemptId])
   @@map("registration_passkeys")
+}
+
+model Session {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  userId String @map("user_id") @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tokenHash Bytes @unique @map("token_hash")
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+
+  idleExpiresAt     DateTime @map("idle_expires_at") @db.Timestamptz(3)
+  absoluteExpiresAt DateTime @map("absolute_expires_at") @db.Timestamptz(3)
+
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  @@index([userId, revokedAt])
+  @@index([idleExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@map("sessions")
 }

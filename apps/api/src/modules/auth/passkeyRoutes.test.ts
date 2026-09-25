@@ -81,6 +81,7 @@ describe('passkey registration', () => {
     await prisma.registrationPasskey.deleteMany();
 
     await prisma.registrationAttempt.deleteMany();
+    await prisma.session.deleteMany();
     await prisma.user.deleteMany();
   });
 

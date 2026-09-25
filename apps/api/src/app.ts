@@ -5,10 +5,17 @@ import { noopEmailSender, type EmailSender } from './modules/accounts/emailSende
 import { createPasskeyRouter } from './modules/auth/passkeyRoutes.js';
 import { simpleWebAuthnProvider, type WebAuthnProvider } from './modules/auth/webauthnProvider.js';
 import { createCryptoBootstrapRouter } from './modules/accounts/cryptoBootstrapRoutes.js';
+import {
+  simplePasskeyAuthenticationProvider,
+  type PasskeyAuthenticationProvider,
+} from './modules/auth/passkeyAuthenticationProvider.js';
+
+import { createPasskeyLoginRouter } from './modules/auth/passkeyLoginRoutes.js';
 
 interface AppDependencies {
   emailSender?: EmailSender;
   webAuthnProvider?: WebAuthnProvider;
+  passkeyAuthenticationProvider?: PasskeyAuthenticationProvider;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -16,6 +23,8 @@ export function createApp(dependencies: AppDependencies = {}) {
 
   const emailSender = dependencies.emailSender ?? noopEmailSender;
   const webAuthnProvider = dependencies.webAuthnProvider ?? simpleWebAuthnProvider;
+  const passkeyAuthenticationProvider =
+    dependencies.passkeyAuthenticationProvider ?? simplePasskeyAuthenticationProvider;
 
   app.disable('x-powered-by');
 
@@ -36,6 +45,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use('/api/v1/auth/passkeys', createPasskeyRouter(webAuthnProvider));
 
   app.use('/api/v1/accounts/crypto', createCryptoBootstrapRouter());
+
+  app.use('/api/v1/auth/passkeys', createPasskeyLoginRouter(passkeyAuthenticationProvider));
 
   return app;
 }
