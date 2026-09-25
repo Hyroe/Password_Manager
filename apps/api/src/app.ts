@@ -10,6 +10,7 @@ import {
   type PasskeyAuthenticationProvider,
 } from './modules/auth/passkeyAuthenticationProvider.js';
 import { createSessionRouter } from './modules/auth/sessionRoutes.js';
+import { createVaultUnlockRouter } from './modules/crypto/vaultUnlockRoutes.js';
 
 import { createPasskeyLoginRouter } from './modules/auth/passkeyLoginRoutes.js';
 
@@ -50,6 +51,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use('/api/v1/auth/passkeys', createPasskeyLoginRouter(passkeyAuthenticationProvider));
 
   app.use('/api/v1', createSessionRouter());
+
+  app.use('/api/v1/crypto', createVaultUnlockRouter());
 
   return app;
 }
