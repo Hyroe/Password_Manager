@@ -9,6 +9,7 @@ import {
   simplePasskeyAuthenticationProvider,
   type PasskeyAuthenticationProvider,
 } from './modules/auth/passkeyAuthenticationProvider.js';
+import { createSessionRouter } from './modules/auth/sessionRoutes.js';
 
 import { createPasskeyLoginRouter } from './modules/auth/passkeyLoginRoutes.js';
 
@@ -47,6 +48,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use('/api/v1/accounts/crypto', createCryptoBootstrapRouter());
 
   app.use('/api/v1/auth/passkeys', createPasskeyLoginRouter(passkeyAuthenticationProvider));
+
+  app.use('/api/v1', createSessionRouter());
 
   return app;
 }
