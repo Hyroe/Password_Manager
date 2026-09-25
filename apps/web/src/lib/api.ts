@@ -8,11 +8,18 @@ interface ApiErrorResponse {
 export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
+
+    credentials: 'same-origin',
+
     headers: {
       'Content-Type': 'application/json',
       ...init?.headers,
     },
   });
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
 
   const body = (await response.json().catch(() => undefined)) as ApiErrorResponse | T | undefined;
 
