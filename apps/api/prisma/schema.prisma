@@ -93,7 +93,7 @@ model UserCryptoProfile {
 
   protocolVersion Int @map("protocol_version")
 
-  kdfAlgorithm      KdfAlgorithm
+  kdfAlgorithm      KdfAlgorithm @map("kdf_algorithm")
   kdfProfileVersion Int          @map("kdf_profile_version")
 
   argon2MemoryKib   Int @map("argon2_memory_kib")

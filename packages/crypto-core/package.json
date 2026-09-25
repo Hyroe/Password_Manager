@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./pkg/pm_crypto_core.d.ts",
+      "import": "./pkg/pm_crypto_core.js",
+      "default": "./pkg/pm_crypto_core.js"
+    }
+  },
   "scripts": {
     "typecheck": "cargo check",
     "test": "cargo test",

@@ -2,7 +2,7 @@
   "name": "password-manager",
   "private": true,
   "scripts": {
-    "dev": "pnpm --parallel --filter @pm/web --filter @pm/api dev",
+    "dev": "pnpm --filter @pm/crypto-core build && pnpm --parallel --filter @pm/web --filter @pm/api dev",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
