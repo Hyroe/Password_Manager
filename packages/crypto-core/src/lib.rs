@@ -1,6 +1,7 @@
 mod bootstrap;
 mod envelope;
 mod kdf;
+mod unlock;
 
 use wasm_bindgen::prelude::*;
 use zeroize::Zeroize;
@@ -127,6 +128,31 @@ pub fn unwrap_key(
     unwrap_key_inner(key_encryption_key, envelope, aad)
         .map(|key| key.into_boxed_slice())
         .map_err(crypto_error)
+}
+
+#[wasm_bindgen]
+pub fn crypto_protocol_version() -> u32 {
+    1
+}
+
+#[wasm_bindgen]
+pub fn crypto_kdf_profile_version() -> u32 {
+    kdf::KDF_PROFILE_VERSION
+}
+
+#[wasm_bindgen]
+pub fn crypto_argon2_memory_kib() -> u32 {
+    kdf::ARGON2_MEMORY_KIB
+}
+
+#[wasm_bindgen]
+pub fn crypto_argon2_iterations() -> u32 {
+    kdf::ARGON2_ITERATIONS
+}
+
+#[wasm_bindgen]
+pub fn crypto_argon2_parallelism() -> u32 {
+    kdf::ARGON2_PARALLELISM
 }
 
 #[cfg(test)]

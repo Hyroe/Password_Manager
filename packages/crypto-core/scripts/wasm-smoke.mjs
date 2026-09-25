@@ -11,6 +11,7 @@ const {
   wrap_key,
   unwrap_key,
   create_account_bootstrap,
+  unlock_personal_vault,
 } = require('../pkg-node/pm_crypto_core.js');
 
 function equalBytes(left, right) {
@@ -134,15 +135,82 @@ console.log({
   vaultEnvelopeBytes: vaultEnvelope.length,
 });
 
+const unlockedVault =
+  unlock_personal_vault(
+    'correct horse battery staple',
+    bootstrapAccountSecret,
+    bootstrapSalt,
+    rootEnvelope,
+    rootAad,
+    vaultEnvelope,
+    vaultAad,
+  );
+
+if (unlockedVault.is_cleared) {
+  throw new Error(
+    'Vault unexpectedly started cleared',
+  );
+}
+
+console.log('WASM vault unlock test passed');
+
+unlockedVault.clear();
+
+if (!unlockedVault.is_cleared) {
+  throw new Error(
+    'Unlocked vault did not clear',
+  );
+}
+
+console.log(
+  'WASM unlocked vault cleanup passed',
+);
+
+unlockedVault.free();
+
+let wrongPasswordRejected = false;
+
+try {
+  const shouldFail =
+    unlock_personal_vault(
+      'definitely wrong password',
+      bootstrapAccountSecret,
+      bootstrapSalt,
+      rootEnvelope,
+      rootAad,
+      vaultEnvelope,
+      vaultAad,
+    );
+
+  shouldFail.clear();
+  shouldFail.free();
+} catch {
+  wrongPasswordRejected = true;
+}
+
+if (!wrongPasswordRejected) {
+  throw new Error(
+    'Wrong Master Password unexpectedly unlocked vault',
+  );
+}
+
+console.log(
+  'Wrong Master Password rejected correctly',
+);
+
 bootstrapAccountSecret.fill(0);
 bootstrapRecoveryKey.fill(0);
+bootstrapSalt.fill(0);
+
+rootEnvelope.fill(0);
+recoveryEnvelope.fill(0);
+vaultEnvelope.fill(0);
 
 bootstrap.clear();
 bootstrap.free();
 
 /*
  * Best-effort cleanup of JS-visible copies.
- * This does not guarantee erasure of every historical WASM/JS copy.
  */
 accountSecret.fill(0);
 salt.fill(0);
