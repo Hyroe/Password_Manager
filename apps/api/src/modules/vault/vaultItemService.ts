@@ -105,6 +105,12 @@ export async function createEncryptedVaultItem(
   ) {
     throw new Error('INVALID_CRYPTO_MATERIAL');
   }
+  if (
+    input.itemKeyEnvelope[0] !== input.envelopeVersion ||
+    input.ciphertext[0] !== input.ciphertextVersion
+  ) {
+    throw new Error('INVALID_CRYPTO_MATERIAL');
+  }
 
   return prisma.$transaction(async (tx) => {
     const vault = await tx.vault.findFirst({

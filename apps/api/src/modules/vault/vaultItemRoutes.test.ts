@@ -16,6 +16,14 @@ import { generateSecurityToken, hashSecurityToken } from '../../lib/securityToke
 
 const app = createApp();
 
+function encryptedFixture(length: number, fill: number, version = 1): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(length).fill(fill);
+
+  bytes[0] = version;
+
+  return bytes;
+}
+
 describe('encrypted vault item routes', () => {
   beforeEach(async () => {
     await prisma.itemKeyEnvelope.deleteMany();
@@ -78,7 +86,7 @@ describe('encrypted vault item routes', () => {
 
         envelopeVersion: 1,
 
-        encryptedKey: new Uint8Array(61).fill(0x11),
+        encryptedKey: encryptedFixture(61, 0x11),
       },
     });
 
@@ -158,11 +166,9 @@ describe('encrypted vault item routes', () => {
       .set('Cookie', `pm_session=${token}`)
       .send({});
 
-    const itemKeyEnvelope = new Uint8Array(61).fill(0x22);
+    const itemKeyEnvelope = encryptedFixture(61, 0x22);
 
-    const ciphertext = new Uint8Array(128).fill(0x33);
-
-    ciphertext[0] = 1;
+    const ciphertext = encryptedFixture(128, 0x33);
 
     const response = await request(app)
       .post(`/api/v1/vaults/${vault.id}/items`)
@@ -231,6 +237,10 @@ describe('encrypted vault item routes', () => {
       .set('Cookie', `pm_session=${token}`)
       .send({});
 
+    const itemKeyEnvelope = encryptedFixture(61, 0x44);
+
+    const ciphertext = encryptedFixture(64, 0x55);
+
     const body = {
       itemId: reservation.body.itemId,
 
@@ -244,9 +254,9 @@ describe('encrypted vault item routes', () => {
 
       envelopeVersion: 1,
 
-      itemKeyEnvelope: encodeBase64Url(new Uint8Array(61).fill(0x44)),
+      itemKeyEnvelope: encodeBase64Url(itemKeyEnvelope),
 
-      ciphertext: encodeBase64Url(new Uint8Array(64).fill(0x55)),
+      ciphertext: encodeBase64Url(ciphertext),
     };
 
     const first = await request(app)
@@ -274,6 +284,64 @@ describe('encrypted vault item routes', () => {
     ).toBe(1);
   });
 
+  it('rejects crypto material whose embedded version does not match metadata', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const reservation = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    /*
+     * Metadata says envelope version 1,
+     * but the envelope itself starts with 2.
+     */
+    const itemKeyEnvelope = encryptedFixture(61, 0x22, 2);
+
+    const ciphertext = encryptedFixture(64, 0x33, 1);
+
+    const response = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        itemId: reservation.body.itemId,
+
+        revisionNumber: 1,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(itemKeyEnvelope),
+
+        ciphertext: encodeBase64Url(ciphertext),
+      });
+
+    expect(response.status).toBe(400);
+
+    expect(response.body.error.code).toBe('INVALID_CRYPTO_MATERIAL');
+
+    const item = await prisma.vaultItem.findUniqueOrThrow({
+      where: {
+        id: reservation.body.itemId,
+      },
+    });
+
+    expect(item.currentRevisionNumber).toBe(0);
+
+    expect(
+      await prisma.vaultItemRevision.count({
+        where: {
+          itemId: item.id,
+        },
+      }),
+    ).toBe(0);
+  });
+
   it('lists only completed encrypted items', async () => {
     const { vault, token } = await createAuthenticatedVault();
 
@@ -282,11 +350,9 @@ describe('encrypted vault item routes', () => {
       .set('Cookie', `pm_session=${token}`)
       .send({});
 
-    const itemKeyEnvelope = new Uint8Array(61).fill(0x21);
+    const itemKeyEnvelope = encryptedFixture(61, 0x21);
 
-    const ciphertext = new Uint8Array(80).fill(0x31);
-
-    ciphertext[0] = 1;
+    const ciphertext = encryptedFixture(80, 0x31);
 
     await request(app)
       .post(`/api/v1/vaults/${vault.id}/items`)
@@ -356,6 +422,7 @@ describe('encrypted vault item routes', () => {
       `pm:v1:item-payload:vault:${vault.id}:item:${item.id}:revision:1:item-key-version:1`,
     );
   });
+
   it('returns one encrypted vault item', async () => {
     const { vault, token } = await createAuthenticatedVault();
 
@@ -364,11 +431,9 @@ describe('encrypted vault item routes', () => {
       .set('Cookie', `pm_session=${token}`)
       .send({});
 
-    const itemKeyEnvelope = new Uint8Array(61).fill(0x41);
+    const itemKeyEnvelope = encryptedFixture(61, 0x41);
 
-    const ciphertext = new Uint8Array(96).fill(0x51);
-
-    ciphertext[0] = 1;
+    const ciphertext = encryptedFixture(96, 0x51);
 
     await request(app)
       .post(`/api/v1/vaults/${vault.id}/items`)
@@ -417,6 +482,7 @@ describe('encrypted vault item routes', () => {
 
     expect(response.body.ciphertext).toBe(encodeBase64Url(ciphertext));
   });
+
   it('returns 404 for an unknown item', async () => {
     const { vault, token } = await createAuthenticatedVault();
 
@@ -428,6 +494,7 @@ describe('encrypted vault item routes', () => {
 
     expect(response.body.error.code).toBe('ITEM_NOT_FOUND');
   });
+
   it('requires authentication to list vault items', async () => {
     const { vault } = await createAuthenticatedVault();
 

@@ -122,6 +122,8 @@ export default function App() {
 
   const unlockedVaultRef = useRef<UnlockedVault | null>(null);
 
+  const unlockedVaultIdRef = useRef<string | null>(null);
+
   type RuntimeState =
     'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
 
@@ -133,6 +135,7 @@ export default function App() {
       unlocked.free();
 
       unlockedVaultRef.current = null;
+      unlockedVaultIdRef.current = null;
     }
   }
 
@@ -546,7 +549,7 @@ export default function App() {
       disposeUnlockedVault();
 
       unlockedVaultRef.current = unlocked;
-
+      unlockedVaultIdRef.current = recoveryKit.account.vaultId;
       /*
        * Drop the Recovery Kit reference after
        * successful unlock. It is no longer
