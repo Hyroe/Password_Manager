@@ -27,11 +27,21 @@ import {
   getVaultItemUpdateOptions,
   listEncryptedVaultItems,
   reserveVaultItem,
+  deleteEncryptedVaultItem,
   type CreatedVaultItem,
   type EncryptedVaultItem,
   type VaultItemReservation,
   type VaultItemUpdateOptions,
+  type DeletedVaultItem,
 } from './vaultItemApi';
+
+export async function deleteVaultItem(
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+): Promise<DeletedVaultItem> {
+  return deleteEncryptedVaultItem(vaultId, itemId, expectedRevisionNumber);
+}
 
 function expectedAad(item: {
   vaultId: string;

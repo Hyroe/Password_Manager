@@ -167,3 +167,26 @@ export async function createEncryptedVaultItemRevision(
     body: JSON.stringify(body),
   });
 }
+
+export interface DeletedVaultItem {
+  id: string;
+  vaultId: string;
+
+  revisionNumber: number;
+
+  deletedAt: string;
+}
+
+export async function deleteEncryptedVaultItem(
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+): Promise<DeletedVaultItem> {
+  return apiRequest<DeletedVaultItem>(`/api/v1/vaults/${vaultId}/items/${itemId}`, {
+    method: 'DELETE',
+
+    body: JSON.stringify({
+      expectedRevisionNumber,
+    }),
+  });
+}

@@ -32,6 +32,7 @@ import type { EncryptedVaultItem } from './lib/vaultItemApi';
 
 import {
   createLoginVaultItem,
+  deleteVaultItem,
   listVaultItems,
   loadAndDecryptLoginItem,
   updateLoginVaultItem,
@@ -175,6 +176,114 @@ export default function App() {
 
       unlockedVaultRef.current = null;
       unlockedVaultIdRef.current = null;
+    }
+  }
+
+  async function handleDeleteLoginItem(itemId: string) {
+    const vaultId = unlockedVaultIdRef.current;
+
+    if (!vaultId) {
+      setError('Vault is locked.');
+      return;
+    }
+
+    const item = vaultItems.find((entry) => entry.id === itemId);
+
+    if (!item) {
+      setError('Vault item metadata is unavailable.');
+
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Delete this login? The encrypted history will be retained for recovery.',
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    resetMessages();
+    setLoading(true);
+
+    try {
+      await deleteVaultItem(vaultId, itemId, item.revisionNumber);
+
+      /*
+       * Drop decrypted plaintext immediately
+       * when the selected item is deleted.
+       */
+      if (selectedItemId === itemId) {
+        setEditingLogin(false);
+        setSelectedLogin(null);
+        setSelectedItemId(null);
+      }
+
+      const refreshedItems = await listVaultItems(vaultId);
+
+      setVaultItems(refreshedItems);
+
+      setMessage('Login deleted.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
+        /*
+         * Another client changed the item.
+         * Do not allow this stale tab to keep
+         * operating on the old plaintext.
+         */
+        if (selectedItemId === itemId) {
+          setEditingLogin(false);
+          setSelectedLogin(null);
+          setSelectedItemId(null);
+        }
+
+        try {
+          const latest = await listVaultItems(vaultId);
+
+          setVaultItems(latest);
+        } catch {
+          setVaultItems([]);
+        }
+
+        setError(
+          'This item changed in another client. Review the latest revision before deleting it.',
+        );
+
+        return;
+      }
+
+      if (error instanceof ApiError && error.code === 'ITEM_NOT_FOUND') {
+        if (selectedItemId === itemId) {
+          setEditingLogin(false);
+          setSelectedLogin(null);
+          setSelectedItemId(null);
+        }
+
+        const latest = await listVaultItems(vaultId).catch(() => []);
+
+        setVaultItems(latest);
+
+        setError('This item no longer exists in the active vault.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Login could not be deleted.');
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -1353,6 +1462,15 @@ export default function App() {
                     }}
                   >
                     View
+                  </button>{' '}
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      void handleDeleteLoginItem(item.id);
+                    }}
+                  >
+                    Delete
                   </button>
                 </li>
               ))}
@@ -1403,6 +1521,16 @@ export default function App() {
 
                   <button type="button" disabled={loading} onClick={handleStartEditingLogin}>
                     Edit
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      void handleDeleteLoginItem(selectedItemId);
+                    }}
+                  >
+                    Delete
                   </button>
 
                   <button type="button" onClick={handleCloseLoginItem}>
