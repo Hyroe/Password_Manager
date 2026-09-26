@@ -1,5 +1,6 @@
 mod bootstrap;
 mod envelope;
+mod item;
 mod kdf;
 mod unlock;
 

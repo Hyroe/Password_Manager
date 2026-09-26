@@ -29,6 +29,16 @@ impl UnlockedVault {
     }
 }
 
+impl UnlockedVault {
+    pub(crate) fn vault_key_bytes(&self) -> Result<&[u8; KEY_LENGTH], &'static str> {
+        if self.cleared {
+            return Err("Vault is locked");
+        }
+
+        Ok(&self.vault_key)
+    }
+}
+
 impl Drop for UnlockedVault {
     fn drop(&mut self) {
         self.clear();

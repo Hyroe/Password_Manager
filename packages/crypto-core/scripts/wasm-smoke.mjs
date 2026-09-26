@@ -12,6 +12,8 @@ const {
   unwrap_key,
   create_account_bootstrap,
   unlock_personal_vault,
+  encrypt_login_item,
+decrypt_login_item,
 } = require('../pkg-node/pm_crypto_core.js');
 
 function equalBytes(left, right) {
@@ -153,6 +155,88 @@ if (unlockedVault.is_cleared) {
 }
 
 console.log('WASM vault unlock test passed');
+
+const itemKeyAad = encoder.encode(
+  'pm:v1:item-key:vault:test-vault:item:test-item:revision:1:vault-key-version:1',
+);
+
+const itemPayloadAad = encoder.encode(
+  'pm:v1:item-payload:vault:test-vault:item:test-item:revision:1:item-key-version:1',
+);
+
+const encryptedItem =
+  encrypt_login_item(
+    unlockedVault,
+    {
+      name: 'GitHub',
+      username:
+        'daniel@example.com',
+      password:
+        'super-secret-password',
+      urls: [
+        'https://github.com',
+      ],
+      notes:
+        'Personal account',
+    },
+    itemKeyAad,
+    itemPayloadAad,
+  );
+
+const encryptedItemKey =
+  encryptedItem
+    .item_key_envelope();
+
+const itemCiphertext =
+  encryptedItem.ciphertext();
+
+const decryptedItem =
+  decrypt_login_item(
+    unlockedVault,
+    encryptedItemKey,
+    itemKeyAad,
+    itemCiphertext,
+    itemPayloadAad,
+  );
+
+if (
+  decryptedItem.itemType !==
+    'LOGIN' ||
+  decryptedItem.name !==
+    'GitHub' ||
+  decryptedItem.username !==
+    'daniel@example.com' ||
+  decryptedItem.password !==
+    'super-secret-password'
+) {
+  throw new Error(
+    'Decrypted LOGIN item does not match original item',
+  );
+}
+
+console.log(
+  'WASM LOGIN item roundtrip passed',
+);
+
+console.log({
+  itemKeyEnvelopeBytes:
+    encryptedItemKey.length,
+
+  itemCiphertextBytes:
+    itemCiphertext.length,
+
+  payloadVersion:
+    encryptedItem.payload_version,
+
+  ciphertextVersion:
+    encryptedItem.ciphertext_version,
+});
+
+encryptedItemKey.fill(0);
+itemCiphertext.fill(0);
+
+encryptedItem.clear();
+encryptedItem.free();
 
 unlockedVault.clear();
 
