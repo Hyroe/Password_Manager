@@ -22,12 +22,15 @@ import {
 
 import {
   createEncryptedVaultItem,
+  createEncryptedVaultItemRevision,
   getEncryptedVaultItem,
+  getVaultItemUpdateOptions,
   listEncryptedVaultItems,
   reserveVaultItem,
   type CreatedVaultItem,
   type EncryptedVaultItem,
   type VaultItemReservation,
+  type VaultItemUpdateOptions,
 } from './vaultItemApi';
 
 function expectedAad(item: {
@@ -75,6 +78,99 @@ function validateReservation(vaultId: string, reservation: VaultItemReservation)
   }
 
   return aad;
+}
+
+function validateUpdateOptions(
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+  options: VaultItemUpdateOptions,
+) {
+  if (
+    options.vaultId !== vaultId ||
+    options.itemId !== itemId ||
+    options.expectedRevisionNumber !== expectedRevisionNumber ||
+    options.revisionNumber !== expectedRevisionNumber + 1 ||
+    options.payloadVersion !== ITEM_PAYLOAD_VERSION ||
+    options.ciphertextVersion !== ITEM_CIPHERTEXT_VERSION ||
+    options.itemKeyVersion !== ITEM_KEY_VERSION ||
+    options.envelopeVersion !== ITEM_KEY_ENVELOPE_VERSION
+  ) {
+    throw new Error('Unsupported vault item update context.');
+  }
+
+  const aad = expectedAad({
+    vaultId,
+    itemId,
+
+    revisionNumber: options.revisionNumber,
+
+    itemKeyVersion: options.itemKeyVersion,
+
+    vaultKeyVersion: options.vaultKeyVersion,
+  });
+
+  if (options.aad.itemKey !== aad.itemKey || options.aad.payload !== aad.payload) {
+    throw new Error('Invalid vault item update context.');
+  }
+
+  return aad;
+}
+
+export async function updateLoginVaultItem(
+  vault: UnlockedVault,
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+  draft: LoginItemDraft,
+): Promise<CreatedVaultItem> {
+  const options = await getVaultItemUpdateOptions(vaultId, itemId, expectedRevisionNumber);
+
+  const aad = validateUpdateOptions(vaultId, itemId, expectedRevisionNumber, options);
+
+  /*
+   * encryptLoginItem generates a fresh
+   * random Item Key and fresh AES-GCM
+   * nonce for this revision.
+   */
+  const encrypted = await encryptLoginItem(vault, draft, aad.itemKey, aad.payload);
+
+  try {
+    if (
+      encrypted.payloadVersion !== options.payloadVersion ||
+      encrypted.ciphertextVersion !== options.ciphertextVersion
+    ) {
+      throw new Error('Crypto output version mismatch.');
+    }
+
+    if (encrypted.itemKeyEnvelope.length !== ITEM_KEY_ENVELOPE_BYTES) {
+      throw new Error('Invalid encrypted item key.');
+    }
+
+    return await createEncryptedVaultItemRevision(vaultId, itemId, {
+      expectedRevisionNumber,
+
+      revisionNumber: options.revisionNumber,
+
+      payloadVersion: encrypted.payloadVersion,
+
+      ciphertextVersion: encrypted.ciphertextVersion,
+
+      itemKeyVersion: options.itemKeyVersion,
+
+      vaultKeyVersion: options.vaultKeyVersion,
+
+      envelopeVersion: options.envelopeVersion,
+
+      itemKeyEnvelope: bytesToBase64Url(encrypted.itemKeyEnvelope),
+
+      ciphertext: bytesToBase64Url(encrypted.ciphertext),
+    });
+  } finally {
+    wipeBytes(encrypted.itemKeyEnvelope);
+
+    wipeBytes(encrypted.ciphertext);
+  }
 }
 
 function validateEncryptedItem(expectedVaultId: string, item: EncryptedVaultItem) {

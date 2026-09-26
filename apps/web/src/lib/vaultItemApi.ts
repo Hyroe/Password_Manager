@@ -102,3 +102,68 @@ export async function getEncryptedVaultItem(
 ): Promise<EncryptedVaultItem> {
   return apiRequest<EncryptedVaultItem>(`/api/v1/vaults/${vaultId}/items/${itemId}`);
 }
+
+export interface VaultItemUpdateOptions {
+  vaultId: string;
+  itemId: string;
+
+  expectedRevisionNumber: number;
+  revisionNumber: number;
+
+  payloadVersion: number;
+  ciphertextVersion: number;
+
+  itemKeyVersion: number;
+  vaultKeyVersion: number;
+
+  envelopeVersion: number;
+
+  aad: {
+    itemKey: string;
+    payload: string;
+  };
+}
+
+interface CreateEncryptedVaultItemRevisionRequest {
+  expectedRevisionNumber: number;
+  revisionNumber: number;
+
+  payloadVersion: number;
+  ciphertextVersion: number;
+
+  itemKeyVersion: number;
+  vaultKeyVersion: number;
+
+  envelopeVersion: number;
+
+  itemKeyEnvelope: string;
+  ciphertext: string;
+}
+
+export async function getVaultItemUpdateOptions(
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+): Promise<VaultItemUpdateOptions> {
+  return apiRequest<VaultItemUpdateOptions>(
+    `/api/v1/vaults/${vaultId}/items/${itemId}/revisions/options`,
+    {
+      method: 'POST',
+
+      body: JSON.stringify({
+        expectedRevisionNumber,
+      }),
+    },
+  );
+}
+
+export async function createEncryptedVaultItemRevision(
+  vaultId: string,
+  itemId: string,
+  body: CreateEncryptedVaultItemRevisionRequest,
+): Promise<CreatedVaultItem> {
+  return apiRequest<CreatedVaultItem>(`/api/v1/vaults/${vaultId}/items/${itemId}/revisions`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}

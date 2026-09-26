@@ -30,7 +30,12 @@ import type { LoginItemPayload } from './lib/cryptoCore';
 
 import type { EncryptedVaultItem } from './lib/vaultItemApi';
 
-import { createLoginVaultItem, listVaultItems, loadAndDecryptLoginItem } from './lib/vaultItems';
+import {
+  createLoginVaultItem,
+  listVaultItems,
+  loadAndDecryptLoginItem,
+  updateLoginVaultItem,
+} from './lib/vaultItems';
 
 interface StartRegistrationResponse {
   registrationId: string;
@@ -146,6 +151,18 @@ export default function App() {
 
   const loginNotesRef = useRef<HTMLTextAreaElement>(null);
 
+  const [editingLogin, setEditingLogin] = useState(false);
+
+  const editNameRef = useRef<HTMLInputElement>(null);
+
+  const editUsernameRef = useRef<HTMLInputElement>(null);
+
+  const editPasswordRef = useRef<HTMLInputElement>(null);
+
+  const editUrlRef = useRef<HTMLInputElement>(null);
+
+  const editNotesRef = useRef<HTMLTextAreaElement>(null);
+
   type RuntimeState =
     'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
 
@@ -221,6 +238,7 @@ export default function App() {
     setVaultItems([]);
     setSelectedLogin(null);
     setSelectedItemId(null);
+    setEditingLogin(false);
 
     if (loginNameRef.current) {
       loginNameRef.current.value = '';
@@ -240,6 +258,26 @@ export default function App() {
 
     if (loginNotesRef.current) {
       loginNotesRef.current.value = '';
+    }
+
+    if (editNameRef.current) {
+      editNameRef.current.value = '';
+    }
+
+    if (editUsernameRef.current) {
+      editUsernameRef.current.value = '';
+    }
+
+    if (editPasswordRef.current) {
+      editPasswordRef.current.value = '';
+    }
+
+    if (editUrlRef.current) {
+      editUrlRef.current.value = '';
+    }
+
+    if (editNotesRef.current) {
+      editNotesRef.current.value = '';
     }
   }
 
@@ -773,6 +811,7 @@ export default function App() {
      */
     setSelectedLogin(null);
     setSelectedItemId(null);
+    setEditingLogin(false);
 
     try {
       const login = await loadAndDecryptLoginItem(vault, vaultId, itemId);
@@ -800,8 +839,162 @@ export default function App() {
   }
 
   function handleCloseLoginItem() {
+    setEditingLogin(false);
     setSelectedLogin(null);
     setSelectedItemId(null);
+  }
+
+  function handleStartEditingLogin() {
+    if (!selectedLogin || !selectedItemId) {
+      return;
+    }
+
+    setEditingLogin(true);
+    resetMessages();
+  }
+
+  function handleCancelEditingLogin() {
+    setEditingLogin(false);
+
+    if (editPasswordRef.current) {
+      editPasswordRef.current.value = '';
+    }
+  }
+
+  async function handleUpdateLoginItem() {
+    const vault = unlockedVaultRef.current;
+
+    const vaultId = unlockedVaultIdRef.current;
+
+    const itemId = selectedItemId;
+
+    if (!vault || !vaultId || !itemId || !selectedLogin) {
+      setError('No vault item is selected.');
+
+      return;
+    }
+
+    /*
+     * The revision displayed in this tab is
+     * the revision this edit is based on.
+     *
+     * If another tab/client already changed
+     * it, the backend will return 409.
+     */
+    const itemMetadata = vaultItems.find((item) => item.id === itemId);
+
+    if (!itemMetadata) {
+      setError('Vault item metadata is unavailable.');
+
+      return;
+    }
+
+    const name = editNameRef.current?.value.trim() ?? '';
+
+    const username = editUsernameRef.current?.value ?? '';
+
+    const password = editPasswordRef.current?.value ?? '';
+
+    const url = editUrlRef.current?.value.trim() ?? '';
+
+    const notes = editNotesRef.current?.value ?? '';
+
+    resetMessages();
+
+    if (!name) {
+      setError('Login name is required.');
+
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const updated = await updateLoginVaultItem(
+        vault,
+        vaultId,
+        itemId,
+
+        itemMetadata.revisionNumber,
+
+        {
+          name,
+          username,
+          password,
+
+          urls: url.length > 0 ? [url] : [],
+
+          notes,
+        },
+      );
+
+      /*
+       * Read the newly persisted revision
+       * back from the server and decrypt it,
+       * rather than trusting only our local
+       * draft.
+       */
+      const refreshedItems = await listVaultItems(vaultId);
+
+      setVaultItems(refreshedItems);
+
+      const refreshedLogin = await loadAndDecryptLoginItem(vault, vaultId, itemId);
+
+      setSelectedLogin(refreshedLogin);
+
+      setEditingLogin(false);
+
+      setMessage(`Login updated to revision ${updated.revisionNumber}.`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
+        /*
+         * Do not let the stale editor remain
+         * open after a concurrency conflict.
+         */
+        setEditingLogin(false);
+        setSelectedLogin(null);
+        setSelectedItemId(null);
+
+        try {
+          const latest = await listVaultItems(vaultId);
+
+          setVaultItems(latest);
+        } catch {
+          setVaultItems([]);
+        }
+
+        setError(
+          'This item changed in another client. Open it again to review the latest revision.',
+        );
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Login could not be updated.');
+    } finally {
+      /*
+       * Password plaintext should not remain
+       * in an edit field after a save attempt.
+       */
+      if (editPasswordRef.current) {
+        editPasswordRef.current.value = '';
+      }
+
+      setLoading(false);
+    }
   }
 
   async function handleLogout() {
@@ -1176,39 +1369,114 @@ export default function App() {
                 <strong>Item ID:</strong> <code>{selectedItemId}</code>
               </p>
 
-              <p>
-                <strong>Name:</strong> {selectedLogin.name}
-              </p>
+              {!editingLogin ? (
+                <>
+                  <p>
+                    <strong>Name:</strong> {selectedLogin.name}
+                  </p>
 
-              <p>
-                <strong>Username:</strong> {selectedLogin.username}
-              </p>
+                  <p>
+                    <strong>Username:</strong> {selectedLogin.username}
+                  </p>
 
-              <p>
-                <strong>Password:</strong> <code>{selectedLogin.password}</code>
-              </p>
+                  <p>
+                    <strong>Password:</strong> <code>{selectedLogin.password}</code>
+                  </p>
 
-              <p>
-                <strong>URLs:</strong>
-              </p>
+                  <p>
+                    <strong>URLs:</strong>
+                  </p>
 
-              {selectedLogin.urls.length === 0 ? (
-                <p>None</p>
+                  {selectedLogin.urls.length === 0 ? (
+                    <p>None</p>
+                  ) : (
+                    <ul>
+                      {selectedLogin.urls.map((url) => (
+                        <li key={url}>{url}</li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <p>
+                    <strong>Notes:</strong> {selectedLogin.notes}
+                  </p>
+
+                  <button type="button" disabled={loading} onClick={handleStartEditingLogin}>
+                    Edit
+                  </button>
+
+                  <button type="button" onClick={handleCloseLoginItem}>
+                    Close
+                  </button>
+                </>
               ) : (
-                <ul>
-                  {selectedLogin.urls.map((url) => (
-                    <li key={url}>{url}</li>
-                  ))}
-                </ul>
+                <>
+                  <h4>Edit login</h4>
+
+                  <div>
+                    <label>
+                      Name
+                      <input
+                        ref={editNameRef}
+                        type="text"
+                        autoComplete="off"
+                        defaultValue={selectedLogin.name}
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label>
+                      Username
+                      <input
+                        ref={editUsernameRef}
+                        type="text"
+                        autoComplete="off"
+                        defaultValue={selectedLogin.username}
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label>
+                      Password
+                      <input
+                        ref={editPasswordRef}
+                        type="password"
+                        autoComplete="off"
+                        defaultValue={selectedLogin.password}
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label>
+                      URL
+                      <input
+                        ref={editUrlRef}
+                        type="url"
+                        autoComplete="off"
+                        defaultValue={selectedLogin.urls[0] ?? ''}
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label>
+                      Notes
+                      <textarea ref={editNotesRef} defaultValue={selectedLogin.notes} />
+                    </label>
+                  </div>
+
+                  <button type="button" disabled={loading} onClick={handleUpdateLoginItem}>
+                    Save changes
+                  </button>
+
+                  <button type="button" disabled={loading} onClick={handleCancelEditingLogin}>
+                    Cancel
+                  </button>
+                </>
               )}
-
-              <p>
-                <strong>Notes:</strong> {selectedLogin.notes}
-              </p>
-
-              <button type="button" onClick={handleCloseLoginItem}>
-                Close
-              </button>
             </>
           )}
 
