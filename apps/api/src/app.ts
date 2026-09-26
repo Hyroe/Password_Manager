@@ -13,6 +13,7 @@ import { createSessionRouter } from './modules/auth/sessionRoutes.js';
 import { createVaultUnlockRouter } from './modules/crypto/vaultUnlockRoutes.js';
 
 import { createPasskeyLoginRouter } from './modules/auth/passkeyLoginRoutes.js';
+import { createVaultItemRouter } from './modules/vault/vaultItemRoutes.js';
 
 interface AppDependencies {
   emailSender?: EmailSender;
@@ -53,6 +54,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use('/api/v1', createSessionRouter());
 
   app.use('/api/v1/crypto', createVaultUnlockRouter());
+
+  app.use('/api/v1/vaults', createVaultItemRouter());
 
   return app;
 }

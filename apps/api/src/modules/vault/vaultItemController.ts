@@ -1,0 +1,186 @@
+import type { Request, Response } from 'express';
+
+import { decodeCanonicalBase64UrlValue } from '../../lib/base64Url.js';
+
+import { encryptedVaultItemSchema, vaultIdParamsSchema } from './vaultItemSchemas.js';
+
+import { createEncryptedVaultItem, reserveVaultItem } from './vaultItemService.js';
+
+function handleVaultItemError(error: unknown, res: Response): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  switch (error.message) {
+    case 'VAULT_NOT_FOUND':
+      res.status(404).json({
+        error: {
+          code: 'VAULT_NOT_FOUND',
+          message: 'Vault not found.',
+        },
+      });
+
+      return true;
+
+    case 'ITEM_RESERVATION_NOT_FOUND':
+      res.status(404).json({
+        error: {
+          code: 'ITEM_RESERVATION_NOT_FOUND',
+
+          message: 'Item reservation not found.',
+        },
+      });
+
+      return true;
+
+    case 'ITEM_REVISION_CONFLICT':
+      res.status(409).json({
+        error: {
+          code: 'ITEM_REVISION_CONFLICT',
+
+          message: 'The item reservation has already been used.',
+        },
+      });
+
+      return true;
+
+    case 'VAULT_KEY_VERSION_CHANGED':
+      res.status(409).json({
+        error: {
+          code: 'VAULT_KEY_VERSION_CHANGED',
+
+          message: 'The vault key changed. Reserve the item again.',
+        },
+      });
+
+      return true;
+
+    case 'CRYPTO_STATE_INVALID':
+      res.status(409).json({
+        error: {
+          code: 'CRYPTO_STATE_INVALID',
+
+          message: 'The vault cryptographic state is incomplete.',
+        },
+      });
+
+      return true;
+
+    case 'INVALID_CRYPTO_MATERIAL':
+    case 'INVALID_BASE64URL':
+      res.status(400).json({
+        error: {
+          code: 'INVALID_CRYPTO_MATERIAL',
+
+          message: 'Invalid encrypted item material.',
+        },
+      });
+
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+export async function reserveVaultItemController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const parsed = vaultIdParamsSchema.safeParse(req.params);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+        message: 'Invalid vault ID.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const result = await reserveVaultItem(req.auth.userId, parsed.data.vaultId);
+
+    res.status(201).json(result);
+  } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function createVaultItemController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const params = vaultIdParamsSchema.safeParse(req.params);
+
+  const body = encryptedVaultItemSchema.safeParse(req.body);
+
+  if (!params.success || !body.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+
+        message: 'Invalid encrypted item request.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const itemKeyEnvelope = decodeCanonicalBase64UrlValue(body.data.itemKeyEnvelope);
+
+    const ciphertext = decodeCanonicalBase64UrlValue(body.data.ciphertext);
+
+    const result = await createEncryptedVaultItem(req.auth.userId, params.data.vaultId, {
+      itemId: body.data.itemId,
+
+      revisionNumber: body.data.revisionNumber,
+
+      payloadVersion: body.data.payloadVersion,
+
+      ciphertextVersion: body.data.ciphertextVersion,
+
+      itemKeyVersion: body.data.itemKeyVersion,
+
+      vaultKeyVersion: body.data.vaultKeyVersion,
+
+      envelopeVersion: body.data.envelopeVersion,
+
+      itemKeyEnvelope,
+      ciphertext,
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
