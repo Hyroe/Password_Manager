@@ -10,6 +10,7 @@ import {
   getVaultItemUpdateOptionsController,
   listVaultItemsController,
   reserveVaultItemController,
+  restoreVaultItemController,
 } from './vaultItemController.js';
 
 export function createVaultItemRouter() {
@@ -34,6 +35,8 @@ export function createVaultItemRouter() {
     requireSession,
     createVaultItemRevisionController,
   );
+
+  router.post('/:vaultId/items/:itemId/restore', requireSession, restoreVaultItemController);
 
   router.delete('/:vaultId/items/:itemId', requireSession, deleteVaultItemController);
 

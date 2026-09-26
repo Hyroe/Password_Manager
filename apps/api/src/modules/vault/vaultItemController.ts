@@ -9,6 +9,8 @@ import {
   vaultItemDeleteSchema,
   vaultItemParamsSchema,
   vaultItemUpdateOptionsSchema,
+  vaultItemRestoreSchema,
+  vaultItemListQuerySchema,
 } from './vaultItemSchemas.js';
 
 import {
@@ -19,6 +21,7 @@ import {
   listEncryptedVaultItems,
   reserveVaultItem,
   softDeleteVaultItem,
+  restoreVaultItem,
 } from './vaultItemService.js';
 
 function handleVaultItemError(error: unknown, res: Response): boolean {
@@ -223,6 +226,19 @@ export async function listVaultItemsController(req: Request, res: Response) {
     return;
   }
 
+  const query = vaultItemListQuerySchema.safeParse(req.query);
+
+  if (!query.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+        message: 'Invalid vault item list query.',
+      },
+    });
+
+    return;
+  }
+
   const parsed = vaultIdParamsSchema.safeParse(req.params);
 
   if (!parsed.success) {
@@ -237,7 +253,11 @@ export async function listVaultItemsController(req: Request, res: Response) {
   }
 
   try {
-    const items = await listEncryptedVaultItems(req.auth.userId, parsed.data.vaultId);
+    const items = await listEncryptedVaultItems(
+      req.auth.userId,
+      parsed.data.vaultId,
+      query.data.includeDeleted === 'true',
+    );
 
     res.status(200).json({
       items,
@@ -441,6 +461,53 @@ export async function deleteVaultItemController(req: Request, res: Response) {
 
   try {
     const result = await softDeleteVaultItem(
+      req.auth.userId,
+      params.data.vaultId,
+      params.data.itemId,
+      body.data.expectedRevisionNumber,
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function restoreVaultItemController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const params = vaultItemParamsSchema.safeParse(req.params);
+
+  const body = vaultItemRestoreSchema.safeParse(req.body);
+
+  if (!params.success || !body.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+
+        message: 'Invalid vault item restore request.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const result = await restoreVaultItem(
       req.auth.userId,
       params.data.vaultId,
       params.data.itemId,

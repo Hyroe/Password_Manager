@@ -988,4 +988,114 @@ describe('encrypted vault item routes', () => {
 
     expect(item.deletedAt).toBeNull();
   });
+
+  it('restores a soft deleted item without creating a new revision', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    const deleted = await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(deleted.status).toBe(200);
+
+    const restored = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/restore`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(restored.status).toBe(200);
+
+    const item = await prisma.vaultItem.findUniqueOrThrow({
+      where: {
+        id: itemId,
+      },
+    });
+
+    expect(item.deletedAt).toBeNull();
+
+    expect(item.currentRevisionNumber).toBe(1);
+
+    expect(
+      await prisma.vaultItemRevision.count({
+        where: {
+          itemId,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('allows an idempotent restore retry', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    const first = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/restore`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/restore`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(second.status).toBe(200);
+
+    expect(
+      await prisma.vaultItemRevision.count({
+        where: {
+          itemId,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('includes deleted items only when requested', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    const normal = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(normal.body.items).toHaveLength(0);
+
+    const withDeleted = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items?includeDeleted=true`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(withDeleted.body.items).toHaveLength(1);
+
+    expect(withDeleted.body.items[0].id).toBe(itemId);
+
+    expect(withDeleted.body.items[0].deletedAt).toBeTypeOf('string');
+  });
 });

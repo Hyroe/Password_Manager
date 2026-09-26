@@ -63,3 +63,11 @@ export const encryptedVaultItemRevisionSchema = z.object({
 export const vaultItemDeleteSchema = z.object({
   expectedRevisionNumber: z.number().int().positive(),
 });
+
+export const vaultItemRestoreSchema = z.object({
+  expectedRevisionNumber: z.number().int().positive(),
+});
+
+export const vaultItemListQuerySchema = z.object({
+  includeDeleted: z.enum(['true', 'false']).optional(),
+});

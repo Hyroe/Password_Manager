@@ -299,7 +299,11 @@ async function buildEncryptedItemResponse(
   };
 }
 
-export async function listEncryptedVaultItems(userId: string, vaultId: string) {
+export async function listEncryptedVaultItems(
+  userId: string,
+  vaultId: string,
+  includeDeleted = false,
+) {
   const vault = await prisma.vault.findFirst({
     where: {
       id: vaultId,
@@ -320,7 +324,12 @@ export async function listEncryptedVaultItems(userId: string, vaultId: string) {
   const items = await prisma.vaultItem.findMany({
     where: {
       vaultId,
-      deletedAt: null,
+
+      ...(includeDeleted
+        ? {}
+        : {
+            deletedAt: null,
+          }),
 
       currentRevisionNumber: {
         gt: 0,
@@ -330,6 +339,7 @@ export async function listEncryptedVaultItems(userId: string, vaultId: string) {
     select: {
       id: true,
       currentRevisionNumber: true,
+      deletedAt: true,
     },
 
     orderBy: {
@@ -338,9 +348,19 @@ export async function listEncryptedVaultItems(userId: string, vaultId: string) {
   });
 
   return Promise.all(
-    items.map((item) =>
-      buildEncryptedItemResponse(vaultId, item.id, item.currentRevisionNumber, vaultKeyVersion),
-    ),
+    items.map(async (item) => {
+      const encryptedItem = await buildEncryptedItemResponse(
+        vaultId,
+        item.id,
+        item.currentRevisionNumber,
+        vaultKeyVersion,
+      );
+
+      return {
+        ...encryptedItem,
+        deletedAt: item.deletedAt,
+      };
+    }),
   );
 }
 
@@ -694,6 +714,83 @@ export async function softDeleteVaultItem(
       revisionNumber: expectedRevisionNumber,
 
       deletedAt,
+    };
+  });
+}
+
+export async function restoreVaultItem(
+  userId: string,
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+) {
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.vaultItem.findFirst({
+      where: {
+        id: itemId,
+        vaultId,
+
+        vault: {
+          userId,
+        },
+      },
+
+      select: {
+        id: true,
+        currentRevisionNumber: true,
+        deletedAt: true,
+      },
+    });
+
+    if (!item) {
+      throw new Error('ITEM_NOT_FOUND');
+    }
+
+    if (item.currentRevisionNumber !== expectedRevisionNumber) {
+      throw new Error('ITEM_REVISION_CONFLICT');
+    }
+
+    if (!item.deletedAt) {
+      return {
+        id: item.id,
+        vaultId,
+
+        revisionNumber: item.currentRevisionNumber,
+
+        restoredAt: null,
+      };
+    }
+
+    const restoredAt = new Date();
+
+    const restored = await tx.vaultItem.updateMany({
+      where: {
+        id: itemId,
+        vaultId,
+
+        currentRevisionNumber: expectedRevisionNumber,
+
+        deletedAt: {
+          not: null,
+        },
+      },
+
+      data: {
+        deletedAt: null,
+      },
+    });
+
+    if (restored.count !== 1) {
+      throw new Error('ITEM_REVISION_CONFLICT');
+    }
+
+    return {
+      id: item.id,
+      vaultId,
+
+      revisionNumber: expectedRevisionNumber,
+
+      restoredAt,
     };
   });
 }
