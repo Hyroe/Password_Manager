@@ -2,9 +2,18 @@ import type { Request, Response } from 'express';
 
 import { decodeCanonicalBase64UrlValue } from '../../lib/base64Url.js';
 
-import { encryptedVaultItemSchema, vaultIdParamsSchema } from './vaultItemSchemas.js';
+import {
+  encryptedVaultItemSchema,
+  vaultIdParamsSchema,
+  vaultItemParamsSchema,
+} from './vaultItemSchemas.js';
 
-import { createEncryptedVaultItem, reserveVaultItem } from './vaultItemService.js';
+import {
+  createEncryptedVaultItem,
+  getEncryptedVaultItem,
+  listEncryptedVaultItems,
+  reserveVaultItem,
+} from './vaultItemService.js';
 
 function handleVaultItemError(error: unknown, res: Response): boolean {
   if (!(error instanceof Error)) {
@@ -28,6 +37,16 @@ function handleVaultItemError(error: unknown, res: Response): boolean {
           code: 'ITEM_RESERVATION_NOT_FOUND',
 
           message: 'Item reservation not found.',
+        },
+      });
+
+      return true;
+
+    case 'ITEM_NOT_FOUND':
+      res.status(404).json({
+        error: {
+          code: 'ITEM_NOT_FOUND',
+          message: 'Item not found.',
         },
       });
 
@@ -176,6 +195,91 @@ export async function createVaultItemController(req: Request, res: Response) {
     });
 
     res.status(201).json(result);
+  } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function listVaultItemsController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const parsed = vaultIdParamsSchema.safeParse(req.params);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+        message: 'Invalid vault ID.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const items = await listEncryptedVaultItems(req.auth.userId, parsed.data.vaultId);
+
+    res.status(200).json({
+      items,
+    });
+  } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function getVaultItemController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const parsed = vaultItemParamsSchema.safeParse(req.params);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+
+        message: 'Invalid vault or item ID.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const item = await getEncryptedVaultItem(
+      req.auth.userId,
+      parsed.data.vaultId,
+      parsed.data.itemId,
+    );
+
+    res.status(200).json(item);
   } catch (error) {
     if (handleVaultItemError(error, res)) {
       return;

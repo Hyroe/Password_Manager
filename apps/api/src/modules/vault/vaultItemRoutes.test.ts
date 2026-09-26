@@ -273,4 +273,166 @@ describe('encrypted vault item routes', () => {
       }),
     ).toBe(1);
   });
+
+  it('lists only completed encrypted items', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const completedReservation = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    const itemKeyEnvelope = new Uint8Array(61).fill(0x21);
+
+    const ciphertext = new Uint8Array(80).fill(0x31);
+
+    ciphertext[0] = 1;
+
+    await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        itemId: completedReservation.body.itemId,
+
+        revisionNumber: 1,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(itemKeyEnvelope),
+
+        ciphertext: encodeBase64Url(ciphertext),
+      });
+
+    /*
+     * Intentionally abandoned reservation.
+     * It must not appear in the list.
+     */
+    await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    const response = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(200);
+
+    expect(response.body.items).toHaveLength(1);
+
+    const [item] = response.body.items;
+
+    expect(item).toMatchObject({
+      id: completedReservation.body.itemId,
+
+      vaultId: vault.id,
+
+      revisionNumber: 1,
+
+      payloadVersion: 1,
+      ciphertextVersion: 1,
+
+      itemKeyVersion: 1,
+      vaultKeyVersion: 1,
+
+      envelopeVersion: 1,
+
+      itemKeyEnvelope: encodeBase64Url(itemKeyEnvelope),
+
+      ciphertext: encodeBase64Url(ciphertext),
+    });
+
+    expect(item.aad.itemKey).toBe(
+      `pm:v1:item-key:vault:${vault.id}:item:${item.id}:revision:1:vault-key-version:1`,
+    );
+
+    expect(item.aad.payload).toBe(
+      `pm:v1:item-payload:vault:${vault.id}:item:${item.id}:revision:1:item-key-version:1`,
+    );
+  });
+  it('returns one encrypted vault item', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const reservation = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    const itemKeyEnvelope = new Uint8Array(61).fill(0x41);
+
+    const ciphertext = new Uint8Array(96).fill(0x51);
+
+    ciphertext[0] = 1;
+
+    await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        itemId: reservation.body.itemId,
+
+        revisionNumber: 1,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(itemKeyEnvelope),
+
+        ciphertext: encodeBase64Url(ciphertext),
+      });
+
+    const response = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items/${reservation.body.itemId}`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(200);
+
+    expect(response.body).toMatchObject({
+      id: reservation.body.itemId,
+
+      vaultId: vault.id,
+
+      revisionNumber: 1,
+
+      payloadVersion: 1,
+      ciphertextVersion: 1,
+
+      itemKeyVersion: 1,
+      vaultKeyVersion: 1,
+
+      envelopeVersion: 1,
+    });
+
+    expect(response.body.itemKeyEnvelope).toBe(encodeBase64Url(itemKeyEnvelope));
+
+    expect(response.body.ciphertext).toBe(encodeBase64Url(ciphertext));
+  });
+  it('returns 404 for an unknown item', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const response = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items/${randomUUID()}`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(404);
+
+    expect(response.body.error.code).toBe('ITEM_NOT_FOUND');
+  });
+  it('requires authentication to list vault items', async () => {
+    const { vault } = await createAuthenticatedVault();
+
+    const response = await request(app).get(`/api/v1/vaults/${vault.id}/items`);
+
+    expect(response.status).toBe(401);
+  });
 });

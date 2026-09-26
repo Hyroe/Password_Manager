@@ -30,3 +30,8 @@ export const encryptedVaultItemSchema = z.object({
 
   ciphertext: z.string().min(1).max(140_000),
 });
+
+export const vaultItemParamsSchema = z.object({
+  vaultId: z.string().uuid(),
+  itemId: z.string().uuid(),
+});

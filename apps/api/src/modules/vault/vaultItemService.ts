@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { encodeBase64Url } from '../../lib/base64Url.js';
 
 import {
   ITEM_CIPHERTEXT_VERSION,
@@ -206,4 +207,165 @@ export async function createEncryptedVaultItem(
       createdAt: revision.createdAt,
     };
   });
+}
+
+async function getCurrentVaultKeyVersion(vaultId: string): Promise<number> {
+  const envelope = await prisma.vaultKeyEnvelope.findFirst({
+    where: {
+      vaultId,
+    },
+
+    orderBy: {
+      vaultKeyVersion: 'desc',
+    },
+
+    select: {
+      vaultKeyVersion: true,
+    },
+  });
+
+  if (!envelope) {
+    throw new Error('CRYPTO_STATE_INVALID');
+  }
+
+  return envelope.vaultKeyVersion;
+}
+
+async function buildEncryptedItemResponse(
+  vaultId: string,
+  itemId: string,
+  revisionNumber: number,
+  vaultKeyVersion: number,
+) {
+  const revision = await prisma.vaultItemRevision.findUnique({
+    where: {
+      itemId_revisionNumber: {
+        itemId,
+        revisionNumber,
+      },
+    },
+  });
+
+  if (!revision) {
+    throw new Error('CRYPTO_STATE_INVALID');
+  }
+
+  const keyEnvelope = await prisma.itemKeyEnvelope.findUnique({
+    where: {
+      revisionId_vaultKeyVersion: {
+        revisionId: revision.id,
+        vaultKeyVersion,
+      },
+    },
+  });
+
+  if (!keyEnvelope) {
+    throw new Error('CRYPTO_STATE_INVALID');
+  }
+
+  return {
+    id: itemId,
+    vaultId,
+
+    revisionNumber,
+
+    payloadVersion: revision.payloadVersion,
+
+    ciphertextVersion: revision.ciphertextVersion,
+
+    itemKeyVersion: keyEnvelope.itemKeyVersion,
+
+    vaultKeyVersion: keyEnvelope.vaultKeyVersion,
+
+    envelopeVersion: keyEnvelope.envelopeVersion,
+
+    itemKeyEnvelope: encodeBase64Url(keyEnvelope.encryptedKey),
+
+    ciphertext: encodeBase64Url(revision.ciphertext),
+
+    aad: {
+      itemKey: itemKeyAad(vaultId, itemId, revisionNumber, keyEnvelope.vaultKeyVersion),
+
+      payload: itemPayloadAad(vaultId, itemId, revisionNumber, keyEnvelope.itemKeyVersion),
+    },
+
+    createdAt: revision.createdAt,
+  };
+}
+
+export async function listEncryptedVaultItems(userId: string, vaultId: string) {
+  const vault = await prisma.vault.findFirst({
+    where: {
+      id: vaultId,
+      userId,
+    },
+
+    select: {
+      id: true,
+    },
+  });
+
+  if (!vault) {
+    throw new Error('VAULT_NOT_FOUND');
+  }
+
+  const vaultKeyVersion = await getCurrentVaultKeyVersion(vaultId);
+
+  const items = await prisma.vaultItem.findMany({
+    where: {
+      vaultId,
+      deletedAt: null,
+
+      currentRevisionNumber: {
+        gt: 0,
+      },
+    },
+
+    select: {
+      id: true,
+      currentRevisionNumber: true,
+    },
+
+    orderBy: {
+      updatedAt: 'desc',
+    },
+  });
+
+  return Promise.all(
+    items.map((item) =>
+      buildEncryptedItemResponse(vaultId, item.id, item.currentRevisionNumber, vaultKeyVersion),
+    ),
+  );
+}
+
+export async function getEncryptedVaultItem(userId: string, vaultId: string, itemId: string) {
+  const item = await prisma.vaultItem.findFirst({
+    where: {
+      id: itemId,
+      vaultId,
+
+      deletedAt: null,
+
+      currentRevisionNumber: {
+        gt: 0,
+      },
+
+      vault: {
+        userId,
+      },
+    },
+
+    select: {
+      id: true,
+      currentRevisionNumber: true,
+    },
+  });
+
+  if (!item) {
+    throw new Error('ITEM_NOT_FOUND');
+  }
+
+  const vaultKeyVersion = await getCurrentVaultKeyVersion(vaultId);
+
+  return buildEncryptedItemResponse(vaultId, item.id, item.currentRevisionNumber, vaultKeyVersion);
 }
