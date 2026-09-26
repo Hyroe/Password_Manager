@@ -1098,4 +1098,127 @@ describe('encrypted vault item routes', () => {
 
     expect(withDeleted.body.items[0].deletedAt).toBeTypeOf('string');
   });
+  it('paginates vault items with an opaque cursor', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    for (let index = 0; index < 5; index += 1) {
+      await createCompletedItem(vault.id, token);
+    }
+
+    const first = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items?limit=2`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(first.status).toBe(200);
+
+    expect(first.body.items).toHaveLength(2);
+
+    expect(first.body.page.hasMore).toBe(true);
+
+    expect(first.body.page.nextCursor).toBeTypeOf('string');
+
+    expect(first.body.page.snapshotAt).toBeTypeOf('string');
+
+    const second = await request(app)
+      .get(
+        `/api/v1/vaults/${vault.id}/items?limit=2&cursor=${encodeURIComponent(
+          first.body.page.nextCursor,
+        )}`,
+      )
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(second.status).toBe(200);
+
+    expect(second.body.items).toHaveLength(2);
+
+    const firstIds = first.body.items.map((item: { id: string }) => item.id);
+
+    const secondIds = second.body.items.map((item: { id: string }) => item.id);
+
+    expect(firstIds.some((id: string) => secondIds.includes(id))).toBe(false);
+
+    const third = await request(app)
+      .get(
+        `/api/v1/vaults/${vault.id}/items?limit=2&cursor=${encodeURIComponent(
+          second.body.page.nextCursor,
+        )}`,
+      )
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(third.status).toBe(200);
+
+    expect(third.body.items).toHaveLength(1);
+
+    expect(third.body.page.hasMore).toBe(false);
+
+    expect(third.body.page.nextCursor).toBeNull();
+  });
+  it('does not inject newly created items into an existing pagination snapshot', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    for (let index = 0; index < 3; index += 1) {
+      await createCompletedItem(vault.id, token);
+    }
+
+    const first = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items?limit=1`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(first.status).toBe(200);
+
+    /*
+     * Created after the snapshot began.
+     */
+    const newItem = await createCompletedItem(vault.id, token);
+
+    const second = await request(app)
+      .get(
+        `/api/v1/vaults/${vault.id}/items?limit=10&cursor=${encodeURIComponent(
+          first.body.page.nextCursor,
+        )}`,
+      )
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(second.status).toBe(200);
+
+    expect(second.body.items.some((item: { id: string }) => item.id === newItem.itemId)).toBe(
+      false,
+    );
+  });
+  it('rejects an invalid vault item pagination cursor', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const response = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items?cursor=definitely-not-a-valid-cursor!`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(400);
+
+    expect(response.body.error.code).toBe('INVALID_PAGINATION_CURSOR');
+  });
+  it('binds pagination cursors to the original list filters', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    await createCompletedItem(vault.id, token);
+
+    await createCompletedItem(vault.id, token);
+
+    const first = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items?limit=1`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(first.status).toBe(200);
+
+    const response = await request(app)
+      .get(
+        `/api/v1/vaults/${vault.id}/items?includeDeleted=true&limit=1&cursor=${encodeURIComponent(
+          first.body.page.nextCursor,
+        )}`,
+      )
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(400);
+
+    expect(response.body.error.code).toBe('INVALID_PAGINATION_CURSOR');
+  });
 });

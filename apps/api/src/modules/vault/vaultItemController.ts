@@ -18,11 +18,13 @@ import {
   createEncryptedVaultItemRevision,
   getEncryptedVaultItem,
   getVaultItemUpdateOptions,
-  listEncryptedVaultItems,
+  listEncryptedVaultItemsPage,
   reserveVaultItem,
   softDeleteVaultItem,
   restoreVaultItem,
 } from './vaultItemService.js';
+
+import { decodeVaultItemCursor } from './vaultItemPagination.js';
 
 function handleVaultItemError(error: unknown, res: Response): boolean {
   if (!(error instanceof Error)) {
@@ -226,43 +228,62 @@ export async function listVaultItemsController(req: Request, res: Response) {
     return;
   }
 
+  const params = vaultIdParamsSchema.safeParse(req.params);
+
   const query = vaultItemListQuerySchema.safeParse(req.query);
 
-  if (!query.success) {
+  if (!params.success || !query.success) {
     res.status(400).json({
       error: {
         code: 'INVALID_REQUEST',
-        message: 'Invalid vault item list query.',
+
+        message: 'Invalid vault item list request.',
       },
     });
 
     return;
   }
 
-  const parsed = vaultIdParamsSchema.safeParse(req.params);
-
-  if (!parsed.success) {
-    res.status(400).json({
-      error: {
-        code: 'INVALID_REQUEST',
-        message: 'Invalid vault ID.',
-      },
-    });
-
-    return;
-  }
+  const includeDeleted = query.data.includeDeleted === 'true';
 
   try {
-    const items = await listEncryptedVaultItems(
-      req.auth.userId,
-      parsed.data.vaultId,
-      query.data.includeDeleted === 'true',
-    );
+    const cursor = query.data.cursor ? decodeVaultItemCursor(query.data.cursor) : undefined;
 
-    res.status(200).json({
-      items,
+    if (
+      cursor &&
+      (cursor.vaultId !== params.data.vaultId || cursor.includeDeleted !== includeDeleted)
+    ) {
+      res.status(400).json({
+        error: {
+          code: 'INVALID_PAGINATION_CURSOR',
+
+          message: 'Pagination cursor does not match this request.',
+        },
+      });
+
+      return;
+    }
+
+    const result = await listEncryptedVaultItemsPage(req.auth.userId, params.data.vaultId, {
+      includeDeleted,
+      limit: query.data.limit,
+      ...(cursor ? { cursor } : {}),
     });
+
+    res.status(200).json(result);
   } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_PAGINATION_CURSOR') {
+      res.status(400).json({
+        error: {
+          code: 'INVALID_PAGINATION_CURSOR',
+
+          message: 'Invalid pagination cursor.',
+        },
+      });
+
+      return;
+    }
+
     if (handleVaultItemError(error, res)) {
       return;
     }

@@ -324,6 +324,7 @@ model VaultItem {
 
   @@index([vaultId, deletedAt])
   @@index([vaultId, updatedAt])
+  @@index([vaultId, updatedAt, id])
   @@map("vault_items")
 }
 

@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { encodeBase64Url } from '../../lib/base64Url.js';
+import { encodeVaultItemCursor, type VaultItemCursor } from './vaultItemPagination.js';
 
 import {
   ITEM_CIPHERTEXT_VERSION,
@@ -242,6 +243,7 @@ async function buildEncryptedItemResponse(
   itemId: string,
   revisionNumber: number,
   vaultKeyVersion: number,
+  updatedAt: Date,
 ) {
   const revision = await prisma.vaultItemRevision.findUnique({
     where: {
@@ -296,6 +298,8 @@ async function buildEncryptedItemResponse(
     },
 
     createdAt: revision.createdAt,
+
+    updatedAt,
   };
 }
 
@@ -304,64 +308,17 @@ export async function listEncryptedVaultItems(
   vaultId: string,
   includeDeleted = false,
 ) {
-  const vault = await prisma.vault.findFirst({
-    where: {
-      id: vaultId,
-      userId,
-    },
+  const result = await listEncryptedVaultItemsPage(userId, vaultId, {
+    includeDeleted,
 
-    select: {
-      id: true,
-    },
+    /*
+     * Legacy/internal convenience.
+     * External API is paginated.
+     */
+    limit: 100,
   });
 
-  if (!vault) {
-    throw new Error('VAULT_NOT_FOUND');
-  }
-
-  const vaultKeyVersion = await getCurrentVaultKeyVersion(vaultId);
-
-  const items = await prisma.vaultItem.findMany({
-    where: {
-      vaultId,
-
-      ...(includeDeleted
-        ? {}
-        : {
-            deletedAt: null,
-          }),
-
-      currentRevisionNumber: {
-        gt: 0,
-      },
-    },
-
-    select: {
-      id: true,
-      currentRevisionNumber: true,
-      deletedAt: true,
-    },
-
-    orderBy: {
-      updatedAt: 'desc',
-    },
-  });
-
-  return Promise.all(
-    items.map(async (item) => {
-      const encryptedItem = await buildEncryptedItemResponse(
-        vaultId,
-        item.id,
-        item.currentRevisionNumber,
-        vaultKeyVersion,
-      );
-
-      return {
-        ...encryptedItem,
-        deletedAt: item.deletedAt,
-      };
-    }),
-  );
+  return result.items;
 }
 
 export async function getEncryptedVaultItem(userId: string, vaultId: string, itemId: string) {
@@ -384,6 +341,7 @@ export async function getEncryptedVaultItem(userId: string, vaultId: string, ite
     select: {
       id: true,
       currentRevisionNumber: true,
+      updatedAt: true,
     },
   });
 
@@ -393,7 +351,13 @@ export async function getEncryptedVaultItem(userId: string, vaultId: string, ite
 
   const vaultKeyVersion = await getCurrentVaultKeyVersion(vaultId);
 
-  return buildEncryptedItemResponse(vaultId, item.id, item.currentRevisionNumber, vaultKeyVersion);
+  return buildEncryptedItemResponse(
+    vaultId,
+    item.id,
+    item.currentRevisionNumber,
+    vaultKeyVersion,
+    item.updatedAt,
+  );
 }
 
 export async function getVaultItemUpdateOptions(
@@ -793,4 +757,158 @@ export async function restoreVaultItem(
       restoredAt,
     };
   });
+}
+
+interface ListEncryptedVaultItemsOptions {
+  includeDeleted: boolean;
+  limit: number;
+
+  cursor?: VaultItemCursor;
+}
+
+export async function listEncryptedVaultItemsPage(
+  userId: string,
+  vaultId: string,
+  options: ListEncryptedVaultItemsOptions,
+) {
+  const vault = await prisma.vault.findFirst({
+    where: {
+      id: vaultId,
+      userId,
+    },
+
+    select: {
+      id: true,
+    },
+  });
+
+  if (!vault) {
+    throw new Error('VAULT_NOT_FOUND');
+  }
+
+  const vaultKeyVersion = await getCurrentVaultKeyVersion(vaultId);
+
+  const snapshotAt = options.cursor ? new Date(options.cursor.snapshotAt) : new Date();
+
+  /*
+   * Fetch one extra row so we can tell
+   * whether another page exists.
+   */
+  const items = await prisma.vaultItem.findMany({
+    where: {
+      vaultId,
+
+      ...(options.includeDeleted
+        ? {}
+        : {
+            deletedAt: null,
+          }),
+
+      currentRevisionNumber: {
+        gt: 0,
+      },
+
+      /*
+       * Freeze the result set to the time
+       * the first page was requested.
+       */
+      updatedAt: {
+        lte: snapshotAt,
+      },
+
+      ...(options.cursor
+        ? {
+            OR: [
+              {
+                updatedAt: {
+                  lt: new Date(options.cursor.updatedAt),
+                },
+              },
+
+              {
+                updatedAt: new Date(options.cursor.updatedAt),
+
+                id: {
+                  lt: options.cursor.itemId,
+                },
+              },
+            ],
+          }
+        : {}),
+    },
+
+    select: {
+      id: true,
+
+      currentRevisionNumber: true,
+
+      deletedAt: true,
+
+      updatedAt: true,
+    },
+
+    orderBy: [
+      {
+        updatedAt: 'desc',
+      },
+
+      {
+        id: 'desc',
+      },
+    ],
+
+    take: options.limit + 1,
+  });
+
+  const hasMore = items.length > options.limit;
+
+  const pageItems = hasMore ? items.slice(0, options.limit) : items;
+
+  const encryptedItems = await Promise.all(
+    pageItems.map(async (item) => {
+      const encryptedItem = await buildEncryptedItemResponse(
+        vaultId,
+        item.id,
+        item.currentRevisionNumber,
+        vaultKeyVersion,
+        item.updatedAt,
+      );
+
+      return {
+        ...encryptedItem,
+
+        deletedAt: item.deletedAt,
+      };
+    }),
+  );
+
+  const lastItem = pageItems[pageItems.length - 1];
+
+  const nextCursor =
+    hasMore && lastItem
+      ? encodeVaultItemCursor({
+          version: 1,
+
+          vaultId,
+
+          includeDeleted: options.includeDeleted,
+
+          snapshotAt: snapshotAt.toISOString(),
+
+          updatedAt: lastItem.updatedAt.toISOString(),
+
+          itemId: lastItem.id,
+        })
+      : null;
+
+  return {
+    items: encryptedItems,
+
+    page: {
+      hasMore,
+      nextCursor,
+
+      snapshotAt: snapshotAt.toISOString(),
+    },
+  };
 }

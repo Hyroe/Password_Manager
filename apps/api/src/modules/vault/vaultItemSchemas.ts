@@ -69,5 +69,9 @@ export const vaultItemRestoreSchema = z.object({
 });
 
 export const vaultItemListQuerySchema = z.object({
-  includeDeleted: z.enum(['true', 'false']).optional(),
+  includeDeleted: z.enum(['true', 'false']).optional().default('false'),
+
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+
+  cursor: z.string().min(1).max(2048).optional(),
 });
