@@ -190,3 +190,61 @@ export async function deleteEncryptedVaultItem(
     }),
   });
 }
+
+export interface EncryptedVaultItem {
+  id: string;
+  vaultId: string;
+
+  revisionNumber: number;
+
+  payloadVersion: number;
+  ciphertextVersion: number;
+
+  itemKeyVersion: number;
+  vaultKeyVersion: number;
+
+  envelopeVersion: number;
+
+  itemKeyEnvelope: string;
+  ciphertext: string;
+
+  aad: {
+    itemKey: string;
+    payload: string;
+  };
+
+  createdAt: string;
+
+  deletedAt: string | null;
+}
+
+export interface RestoredVaultItem {
+  id: string;
+  vaultId: string;
+
+  revisionNumber: number;
+
+  restoredAt: string | null;
+}
+
+export async function listAllEncryptedVaultItems(vaultId: string): Promise<EncryptedVaultItem[]> {
+  const response = await apiRequest<{
+    items: EncryptedVaultItem[];
+  }>(`/api/v1/vaults/${vaultId}/items?includeDeleted=true`);
+
+  return response.items;
+}
+
+export async function restoreEncryptedVaultItem(
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+): Promise<RestoredVaultItem> {
+  return apiRequest<RestoredVaultItem>(`/api/v1/vaults/${vaultId}/items/${itemId}/restore`, {
+    method: 'POST',
+
+    body: JSON.stringify({
+      expectedRevisionNumber,
+    }),
+  });
+}

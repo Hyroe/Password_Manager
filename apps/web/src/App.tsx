@@ -34,7 +34,9 @@ import {
   createLoginVaultItem,
   deleteVaultItem,
   listVaultItems,
+  listVaultItemsIncludingDeleted,
   loadAndDecryptLoginItem,
+  restoreVaultItem,
   updateLoginVaultItem,
 } from './lib/vaultItems';
 
@@ -164,6 +166,8 @@ export default function App() {
 
   const editNotesRef = useRef<HTMLTextAreaElement>(null);
 
+  const [deletedVaultItems, setDeletedVaultItems] = useState<EncryptedVaultItem[]>([]);
+
   type RuntimeState =
     'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
 
@@ -219,9 +223,7 @@ export default function App() {
         setSelectedItemId(null);
       }
 
-      const refreshedItems = await listVaultItems(vaultId);
-
-      setVaultItems(refreshedItems);
+      await refreshVaultItems();
 
       setMessage('Login deleted.');
     } catch (error) {
@@ -251,9 +253,7 @@ export default function App() {
         }
 
         try {
-          const latest = await listVaultItems(vaultId);
-
-          setVaultItems(latest);
+          await refreshVaultItems();
         } catch {
           setVaultItems([]);
         }
@@ -348,6 +348,7 @@ export default function App() {
     setSelectedLogin(null);
     setSelectedItemId(null);
     setEditingLogin(false);
+    setDeletedVaultItems([]);
 
     if (loginNameRef.current) {
       loginNameRef.current.value = '';
@@ -755,9 +756,7 @@ export default function App() {
       setRuntimeState('UNLOCKED');
 
       try {
-        const items = await listVaultItems(recoveryKit.account.vaultId);
-
-        setVaultItems(items);
+        await refreshVaultItems();
       } catch {
         setVaultItems([]);
 
@@ -868,10 +867,7 @@ export default function App() {
       setSelectedLogin(null);
       setSelectedItemId(null);
 
-      const items = await listVaultItems(vaultId);
-
-      setVaultItems(items);
-
+      await refreshVaultItems();
       setMessage('Login encrypted and saved.');
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -1043,9 +1039,7 @@ export default function App() {
        * rather than trusting only our local
        * draft.
        */
-      const refreshedItems = await listVaultItems(vaultId);
-
-      setVaultItems(refreshedItems);
+      await refreshVaultItems();
 
       const refreshedLogin = await loadAndDecryptLoginItem(vault, vaultId, itemId);
 
@@ -1078,9 +1072,7 @@ export default function App() {
         setSelectedItemId(null);
 
         try {
-          const latest = await listVaultItems(vaultId);
-
-          setVaultItems(latest);
+          await refreshVaultItems();
         } catch {
           setVaultItems([]);
         }
@@ -1102,6 +1094,67 @@ export default function App() {
         editPasswordRef.current.value = '';
       }
 
+      setLoading(false);
+    }
+  }
+
+  async function handleRestoreLoginItem(itemId: string) {
+    const vaultId = unlockedVaultIdRef.current;
+
+    if (!vaultId) {
+      setError('Vault is locked.');
+      return;
+    }
+
+    const item = deletedVaultItems.find((entry) => entry.id === itemId);
+
+    if (!item) {
+      setError('Deleted item metadata is unavailable.');
+
+      return;
+    }
+
+    resetMessages();
+    setLoading(true);
+
+    try {
+      await restoreVaultItem(vaultId, itemId, item.revisionNumber);
+
+      await refreshVaultItems();
+
+      setMessage('Login restored.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
+        await refreshVaultItems();
+
+        setError('This item changed in another client. Refresh and try again.');
+
+        return;
+      }
+
+      if (error instanceof ApiError && error.code === 'ITEM_NOT_FOUND') {
+        await refreshVaultItems();
+
+        setError('This deleted item no longer exists.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Login could not be restored.');
+    } finally {
       setLoading(false);
     }
   }
@@ -1153,9 +1206,11 @@ export default function App() {
     }
 
     try {
-      const items = await listVaultItems(vaultId);
+      const allItems = await listVaultItemsIncludingDeleted(vaultId);
 
-      setVaultItems(items);
+      setVaultItems(allItems.filter((item) => item.deletedAt === null));
+
+      setDeletedVaultItems(allItems.filter((item) => item.deletedAt !== null));
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
@@ -1471,6 +1526,35 @@ export default function App() {
                     }}
                   >
                     Delete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <hr />
+
+          <h3>Deleted items</h3>
+
+          {deletedVaultItems.length === 0 ? (
+            <p>No deleted items.</p>
+          ) : (
+            <ul>
+              {deletedVaultItems.map((item) => (
+                <li key={item.id}>
+                  <code>{item.id}</code>
+                  {' — revision '}
+                  {item.revisionNumber}
+                  {' — deleted '}
+                  {item.deletedAt ? new Date(item.deletedAt).toLocaleString() : ''}{' '}
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      void handleRestoreLoginItem(item.id);
+                    }}
+                  >
+                    Restore
                   </button>
                 </li>
               ))}

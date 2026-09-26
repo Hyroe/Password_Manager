@@ -28,6 +28,9 @@ import {
   listEncryptedVaultItems,
   reserveVaultItem,
   deleteEncryptedVaultItem,
+  listAllEncryptedVaultItems,
+  restoreEncryptedVaultItem,
+  type RestoredVaultItem,
   type CreatedVaultItem,
   type EncryptedVaultItem,
   type VaultItemReservation,
@@ -315,4 +318,18 @@ export async function loadAndDecryptLoginItem(
   }
 
   return decryptStoredLoginItem(vault, vaultId, item);
+}
+
+export async function listVaultItemsIncludingDeleted(
+  vaultId: string,
+): Promise<EncryptedVaultItem[]> {
+  return listAllEncryptedVaultItems(vaultId);
+}
+
+export async function restoreVaultItem(
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+): Promise<RestoredVaultItem> {
+  return restoreEncryptedVaultItem(vaultId, itemId, expectedRevisionNumber);
 }
