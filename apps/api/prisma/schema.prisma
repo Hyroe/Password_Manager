@@ -39,6 +39,14 @@ enum VaultKind {
   PERSONAL
 }
 
+enum VaultItemChangeKind {
+  CREATED
+  UPDATED
+  DELETED
+  RESTORED
+  SNAPSHOT
+}
+
 model User {
   id String @id @default(uuid(7)) @db.Uuid
 
@@ -161,8 +169,9 @@ model Vault {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  keyEnvelopes VaultKeyEnvelope[]
-  vaultItems   VaultItem[]
+  keyEnvelopes     VaultKeyEnvelope[]
+  vaultItems       VaultItem[]
+  vaultItemChanges VaultItemChange[]
 
   @@index([userId])
   @@map("vaults")
@@ -320,12 +329,36 @@ model VaultItem {
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
 
+  changes VaultItemChange[]
+
   revisions VaultItemRevision[]
 
   @@index([vaultId, deletedAt])
   @@index([vaultId, updatedAt])
   @@index([vaultId, updatedAt, id])
   @@map("vault_items")
+}
+
+model VaultItemChange {
+  id BigInt @id @default(autoincrement()) @db.BigInt
+
+  vaultId String @map("vault_id") @db.Uuid
+  vault   Vault  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  itemId String    @map("item_id") @db.Uuid
+  item   VaultItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  revisionNumber Int @map("revision_number")
+
+  kind VaultItemChangeKind
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  changedAt DateTime @default(now()) @map("changed_at") @db.Timestamptz(3)
+
+  @@index([vaultId, id])
+  @@index([itemId, id])
+  @@map("vault_item_changes")
 }
 
 model VaultItemRevision {

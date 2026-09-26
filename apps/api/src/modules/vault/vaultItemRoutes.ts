@@ -11,6 +11,7 @@ import {
   listVaultItemsController,
   reserveVaultItemController,
   restoreVaultItemController,
+  syncVaultItemsController,
 } from './vaultItemController.js';
 
 export function createVaultItemRouter() {
@@ -19,6 +20,8 @@ export function createVaultItemRouter() {
   router.post('/:vaultId/items/options', requireSession, reserveVaultItemController);
 
   router.post('/:vaultId/items', requireSession, createVaultItemController);
+
+  router.get('/:vaultId/items/sync', requireSession, syncVaultItemsController);
 
   router.get('/:vaultId/items', requireSession, listVaultItemsController);
 

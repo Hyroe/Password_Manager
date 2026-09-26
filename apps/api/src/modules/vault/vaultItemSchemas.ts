@@ -75,3 +75,9 @@ export const vaultItemListQuerySchema = z.object({
 
   cursor: z.string().min(1).max(2048).optional(),
 });
+
+export const vaultItemSyncQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional().default(100),
+
+  cursor: z.string().min(1).max(2048).optional(),
+});

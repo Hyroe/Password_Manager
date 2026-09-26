@@ -1221,4 +1221,184 @@ describe('encrypted vault item routes', () => {
 
     expect(response.body.error.code).toBe('INVALID_PAGINATION_CURSOR');
   });
+
+  it('returns ordered incremental changes for the item lifecycle', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    /*
+     * Revision 2.
+     */
+    const options = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    const updated = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+
+        revisionNumber: options.body.revisionNumber,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(encryptedFixture(61, 0xa4)),
+
+        ciphertext: encodeBase64Url(encryptedFixture(100, 0xb4)),
+      });
+
+    expect(updated.status).toBe(201);
+
+    const deleted = await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 2,
+      });
+
+    expect(deleted.status).toBe(200);
+
+    const restored = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/restore`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 2,
+      });
+
+    expect(restored.status).toBe(200);
+
+    const response = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items/sync?limit=100`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(200);
+
+    expect(response.body.changes.map((change: { kind: string }) => change.kind)).toEqual([
+      'CREATED',
+      'UPDATED',
+      'DELETED',
+      'RESTORED',
+    ]);
+
+    expect(
+      response.body.changes.map((change: { revisionNumber: number }) => change.revisionNumber),
+    ).toEqual([1, 2, 2, 2]);
+
+    const [createdChange, updatedChange, deletedChange, restoredChange] = response.body.changes;
+
+    expect(createdChange.item).not.toBeNull();
+
+    expect(updatedChange.item).not.toBeNull();
+
+    expect(deletedChange.item).toBeNull();
+
+    expect(deletedChange.deletedAt).toBeTypeOf('string');
+
+    expect(restoredChange.item).not.toBeNull();
+
+    expect(restoredChange.deletedAt).toBeNull();
+
+    expect(response.body.sync.hasMore).toBe(false);
+
+    expect(response.body.sync.nextCursor).toBeTypeOf('string');
+  });
+
+  it('returns only changes after the previous sync cursor', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const firstItem = await createCompletedItem(vault.id, token);
+
+    const firstSync = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items/sync`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(firstSync.status).toBe(200);
+
+    expect(
+      firstSync.body.changes.some(
+        (change: { itemId: string }) => change.itemId === firstItem.itemId,
+      ),
+    ).toBe(true);
+
+    const cursor = firstSync.body.sync.nextCursor;
+
+    const secondItem = await createCompletedItem(vault.id, token);
+
+    const secondSync = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items/sync?cursor=${encodeURIComponent(cursor)}`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(secondSync.status).toBe(200);
+
+    expect(secondSync.body.changes).toHaveLength(1);
+
+    expect(secondSync.body.changes[0].itemId).toBe(secondItem.itemId);
+  });
+  it('paginates the incremental change feed without overlap', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    for (let index = 0; index < 5; index += 1) {
+      await createCompletedItem(vault.id, token);
+    }
+
+    const first = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items/sync?limit=2`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(first.status).toBe(200);
+
+    expect(first.body.changes).toHaveLength(2);
+
+    expect(first.body.sync.hasMore).toBe(true);
+
+    const second = await request(app)
+      .get(
+        `/api/v1/vaults/${vault.id}/items/sync?limit=2&cursor=${encodeURIComponent(
+          first.body.sync.nextCursor,
+        )}`,
+      )
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(second.body.changes).toHaveLength(2);
+
+    const third = await request(app)
+      .get(
+        `/api/v1/vaults/${vault.id}/items/sync?limit=2&cursor=${encodeURIComponent(
+          second.body.sync.nextCursor,
+        )}`,
+      )
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(third.body.changes).toHaveLength(1);
+
+    expect(third.body.sync.hasMore).toBe(false);
+
+    const ids = [...first.body.changes, ...second.body.changes, ...third.body.changes].map(
+      (change: { changeId: string }) => change.changeId,
+    );
+
+    expect(new Set(ids).size).toBe(5);
+  });
+  it('rejects an invalid sync cursor', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const response = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items/sync?cursor=bad!cursor`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(400);
+
+    expect(response.body.error.code).toBe('INVALID_SYNC_CURSOR');
+  });
 });

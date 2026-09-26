@@ -11,6 +11,7 @@ import {
   vaultItemUpdateOptionsSchema,
   vaultItemRestoreSchema,
   vaultItemListQuerySchema,
+  vaultItemSyncQuerySchema,
 } from './vaultItemSchemas.js';
 
 import {
@@ -22,7 +23,10 @@ import {
   reserveVaultItem,
   softDeleteVaultItem,
   restoreVaultItem,
+  syncVaultItems,
 } from './vaultItemService.js';
+
+import { decodeVaultItemSyncCursor } from './vaultItemSyncCursor.js';
 
 import { decodeVaultItemCursor } from './vaultItemPagination.js';
 
@@ -537,6 +541,77 @@ export async function restoreVaultItemController(req: Request, res: Response) {
 
     res.status(200).json(result);
   } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function syncVaultItemsController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const params = vaultIdParamsSchema.safeParse(req.params);
+
+  const query = vaultItemSyncQuerySchema.safeParse(req.query);
+
+  if (!params.success || !query.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+
+        message: 'Invalid vault sync request.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const cursor = query.data.cursor ? decodeVaultItemSyncCursor(query.data.cursor) : undefined;
+
+    if (cursor && cursor.vaultId !== params.data.vaultId) {
+      res.status(400).json({
+        error: {
+          code: 'INVALID_SYNC_CURSOR',
+
+          message: 'Sync cursor does not match this vault.',
+        },
+      });
+
+      return;
+    }
+
+    const result = await syncVaultItems(req.auth.userId, params.data.vaultId, {
+      limit: query.data.limit,
+      ...(cursor ? { cursor } : {}),
+    });
+
+    res.status(200).json(result);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_SYNC_CURSOR') {
+      res.status(400).json({
+        error: {
+          code: 'INVALID_SYNC_CURSOR',
+
+          message: 'Invalid sync cursor.',
+        },
+      });
+
+      return;
+    }
+
     if (handleVaultItemError(error, res)) {
       return;
     }

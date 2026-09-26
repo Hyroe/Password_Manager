@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { encodeBase64Url } from '../../lib/base64Url.js';
 import { encodeVaultItemCursor, type VaultItemCursor } from './vaultItemPagination.js';
+import { encodeVaultItemSyncCursor, type VaultItemSyncCursor } from './vaultItemSyncCursor.js';
 
 import {
   ITEM_CIPHERTEXT_VERSION,
@@ -201,6 +202,19 @@ export async function createEncryptedVaultItem(
         envelopeVersion: input.envelopeVersion,
 
         encryptedKey: input.itemKeyEnvelope,
+      },
+    });
+
+    await tx.vaultItemChange.create({
+      data: {
+        vaultId,
+        itemId: item.id,
+
+        revisionNumber: input.revisionNumber,
+
+        kind: 'CREATED',
+
+        deletedAt: null,
       },
     });
 
@@ -576,6 +590,19 @@ export async function createEncryptedVaultItemRevision(
       },
     });
 
+    await tx.vaultItemChange.create({
+      data: {
+        vaultId,
+        itemId,
+
+        revisionNumber: input.revisionNumber,
+
+        kind: 'UPDATED',
+
+        deletedAt: null,
+      },
+    });
+
     return {
       id: itemId,
       vaultId,
@@ -671,6 +698,20 @@ export async function softDeleteVaultItem(
       throw new Error('ITEM_REVISION_CONFLICT');
     }
 
+    await tx.vaultItemChange.create({
+      data: {
+        vaultId,
+        itemId,
+
+        revisionNumber: expectedRevisionNumber,
+
+        kind: 'DELETED',
+
+        deletedAt,
+        changedAt: deletedAt,
+      },
+    });
+
     return {
       id: item.id,
       vaultId,
@@ -747,6 +788,20 @@ export async function restoreVaultItem(
     if (restored.count !== 1) {
       throw new Error('ITEM_REVISION_CONFLICT');
     }
+
+    await tx.vaultItemChange.create({
+      data: {
+        vaultId,
+        itemId,
+
+        revisionNumber: expectedRevisionNumber,
+
+        kind: 'RESTORED',
+
+        deletedAt: null,
+        changedAt: restoredAt,
+      },
+    });
 
     return {
       id: item.id,
@@ -909,6 +964,148 @@ export async function listEncryptedVaultItemsPage(
       nextCursor,
 
       snapshotAt: snapshotAt.toISOString(),
+    },
+  };
+}
+
+interface SyncVaultItemsOptions {
+  limit: number;
+
+  cursor?: VaultItemSyncCursor;
+}
+
+export async function syncVaultItems(
+  userId: string,
+  vaultId: string,
+  options: SyncVaultItemsOptions,
+) {
+  const vault = await prisma.vault.findFirst({
+    where: {
+      id: vaultId,
+      userId,
+    },
+
+    select: {
+      id: true,
+    },
+  });
+
+  if (!vault) {
+    throw new Error('VAULT_NOT_FOUND');
+  }
+
+  const afterChangeId = options.cursor ? BigInt(options.cursor.afterChangeId) : 0n;
+
+  /*
+   * Fetch one extra change so we know
+   * whether another page exists.
+   */
+  const changes = await prisma.vaultItemChange.findMany({
+    where: {
+      vaultId,
+
+      id: {
+        gt: afterChangeId,
+      },
+    },
+
+    orderBy: {
+      id: 'asc',
+    },
+
+    take: options.limit + 1,
+  });
+
+  const hasMore = changes.length > options.limit;
+
+  const pageChanges = hasMore ? changes.slice(0, options.limit) : changes;
+
+  const vaultKeyVersion = pageChanges.some((change) => change.kind !== 'DELETED')
+    ? await getCurrentVaultKeyVersion(vaultId)
+    : undefined;
+
+  const resultChanges = await Promise.all(
+    pageChanges.map(async (change) => {
+      /*
+       * A delete is a tombstone.
+       * No ciphertext needs to be sent.
+       */
+      if (change.kind === 'DELETED') {
+        return {
+          changeId: change.id.toString(),
+
+          kind: change.kind,
+
+          itemId: change.itemId,
+
+          revisionNumber: change.revisionNumber,
+
+          deletedAt: change.deletedAt,
+
+          changedAt: change.changedAt,
+
+          item: null,
+        };
+      }
+
+      if (vaultKeyVersion === undefined) {
+        throw new Error('CRYPTO_STATE_INVALID');
+      }
+
+      const encryptedItem = await buildEncryptedItemResponse(
+        vaultId,
+        change.itemId,
+        change.revisionNumber,
+        vaultKeyVersion,
+        change.changedAt,
+      );
+
+      return {
+        changeId: change.id.toString(),
+
+        kind: change.kind,
+
+        itemId: change.itemId,
+
+        revisionNumber: change.revisionNumber,
+
+        deletedAt: change.deletedAt,
+
+        changedAt: change.changedAt,
+
+        item: {
+          ...encryptedItem,
+
+          deletedAt: change.deletedAt,
+        },
+      };
+    }),
+  );
+
+  const lastChange = pageChanges[pageChanges.length - 1];
+
+  /*
+   * A sync cursor is always returned,
+   * including when there were no changes.
+   *
+   * That lets the client persist a durable
+   * checkpoint and poll again later.
+   */
+  const nextAfterChangeId = lastChange ? lastChange.id : afterChangeId;
+
+  return {
+    changes: resultChanges,
+
+    sync: {
+      hasMore,
+
+      nextCursor: encodeVaultItemSyncCursor({
+        version: 1,
+
+        vaultId,
+
+        afterChangeId: nextAfterChangeId.toString(),
+      }),
     },
   };
 }
