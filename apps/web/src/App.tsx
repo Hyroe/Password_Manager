@@ -26,6 +26,12 @@ import { downloadRecoveryKit, readRecoveryKit, type RecoveryKit } from './lib/re
 
 import { unlockVault } from './lib/vaultUnlock';
 
+import type { LoginItemPayload } from './lib/cryptoCore';
+
+import type { EncryptedVaultItem } from './lib/vaultItemApi';
+
+import { createLoginVaultItem, listVaultItems, loadAndDecryptLoginItem } from './lib/vaultItems';
+
 interface StartRegistrationResponse {
   registrationId: string;
 }
@@ -124,6 +130,22 @@ export default function App() {
 
   const unlockedVaultIdRef = useRef<string | null>(null);
 
+  const [vaultItems, setVaultItems] = useState<EncryptedVaultItem[]>([]);
+
+  const [selectedLogin, setSelectedLogin] = useState<LoginItemPayload | null>(null);
+
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+
+  const loginNameRef = useRef<HTMLInputElement>(null);
+
+  const loginUsernameRef = useRef<HTMLInputElement>(null);
+
+  const loginPasswordRef = useRef<HTMLInputElement>(null);
+
+  const loginUrlRef = useRef<HTMLInputElement>(null);
+
+  const loginNotesRef = useRef<HTMLTextAreaElement>(null);
+
   type RuntimeState =
     'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
 
@@ -193,6 +215,32 @@ export default function App() {
   function resetMessages() {
     setError('');
     setMessage('');
+  }
+
+  function clearVaultUiState() {
+    setVaultItems([]);
+    setSelectedLogin(null);
+    setSelectedItemId(null);
+
+    if (loginNameRef.current) {
+      loginNameRef.current.value = '';
+    }
+
+    if (loginUsernameRef.current) {
+      loginUsernameRef.current.value = '';
+    }
+
+    if (loginPasswordRef.current) {
+      loginPasswordRef.current.value = '';
+    }
+
+    if (loginUrlRef.current) {
+      loginUrlRef.current.value = '';
+    }
+
+    if (loginNotesRef.current) {
+      loginNotesRef.current.value = '';
+    }
   }
 
   async function startAccountRegistration() {
@@ -559,6 +607,16 @@ export default function App() {
 
       setRuntimeState('UNLOCKED');
 
+      try {
+        const items = await listVaultItems(recoveryKit.account.vaultId);
+
+        setVaultItems(items);
+      } catch {
+        setVaultItems([]);
+
+        setError('Vault unlocked, but items could not be loaded.');
+      }
+
       setMessage('Vault unlocked locally.');
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
@@ -587,11 +645,163 @@ export default function App() {
   function handleLockVault() {
     disposeUnlockedVault();
     discardRecoveryKit();
+    clearVaultUiState();
 
     setRuntimeState('AUTHENTICATED_LOCKED');
 
     setMessage('Vault locked.');
     setError('');
+  }
+
+  async function handleCreateLoginItem() {
+    const vault = unlockedVaultRef.current;
+
+    const vaultId = unlockedVaultIdRef.current;
+
+    if (!vault || !vaultId) {
+      setError('Vault is locked.');
+      return;
+    }
+
+    const name = loginNameRef.current?.value.trim() ?? '';
+
+    const username = loginUsernameRef.current?.value ?? '';
+
+    const password = loginPasswordRef.current?.value ?? '';
+
+    const url = loginUrlRef.current?.value.trim() ?? '';
+
+    const notes = loginNotesRef.current?.value ?? '';
+
+    resetMessages();
+
+    if (!name) {
+      setError('Login name is required.');
+
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await createLoginVaultItem(vault, vaultId, {
+        name,
+        username,
+        password,
+
+        urls: url.length > 0 ? [url] : [],
+
+        notes,
+      });
+
+      /*
+       * Remove plaintext from the form as
+       * soon as persistence succeeds.
+       */
+      if (loginNameRef.current) {
+        loginNameRef.current.value = '';
+      }
+
+      if (loginUsernameRef.current) {
+        loginUsernameRef.current.value = '';
+      }
+
+      if (loginPasswordRef.current) {
+        loginPasswordRef.current.value = '';
+      }
+
+      if (loginUrlRef.current) {
+        loginUrlRef.current.value = '';
+      }
+
+      if (loginNotesRef.current) {
+        loginNotesRef.current.value = '';
+      }
+
+      setSelectedLogin(null);
+      setSelectedItemId(null);
+
+      const items = await listVaultItems(vaultId);
+
+      setVaultItems(items);
+
+      setMessage('Login encrypted and saved.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Login could not be saved.');
+    } finally {
+      /*
+       * Always remove the password from
+       * the DOM after an attempt.
+       */
+      if (loginPasswordRef.current) {
+        loginPasswordRef.current.value = '';
+      }
+
+      setLoading(false);
+    }
+  }
+
+  async function handleViewLoginItem(itemId: string) {
+    const vault = unlockedVaultRef.current;
+
+    const vaultId = unlockedVaultIdRef.current;
+
+    if (!vault || !vaultId) {
+      setError('Vault is locked.');
+      return;
+    }
+
+    setLoading(true);
+    resetMessages();
+
+    /*
+     * Drop any previously decrypted item
+     * before loading another one.
+     */
+    setSelectedLogin(null);
+    setSelectedItemId(null);
+
+    try {
+      const login = await loadAndDecryptLoginItem(vault, vaultId, itemId);
+
+      setSelectedLogin(login);
+      setSelectedItemId(itemId);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Login could not be decrypted.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleCloseLoginItem() {
+    setSelectedLogin(null);
+    setSelectedItemId(null);
   }
 
   async function handleLogout() {
@@ -601,6 +811,7 @@ export default function App() {
      */
     disposeUnlockedVault();
     discardRecoveryKit();
+    clearVaultUiState();
 
     setRuntimeState('AUTHENTICATED_LOCKED');
 
@@ -627,6 +838,37 @@ export default function App() {
       setError('The vault was locked locally, but the server session could not be revoked.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function refreshVaultItems() {
+    const vault = unlockedVaultRef.current;
+
+    const vaultId = unlockedVaultIdRef.current;
+
+    if (!vault || !vaultId) {
+      return;
+    }
+
+    try {
+      const items = await listVaultItems(vaultId);
+
+      setVaultItems(items);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Vault items could not be loaded.');
     }
   }
 
@@ -827,7 +1069,150 @@ export default function App() {
             Signed in as <strong>{authenticatedUser.email}</strong>
           </p>
 
-          <p>Your vault keys are currently available only inside the local WASM crypto runtime.</p>
+          <p>Vault keys are available only inside the local WASM runtime.</p>
+
+          <hr />
+
+          <h3>New login</h3>
+
+          <div>
+            <label>
+              Name
+              <input ref={loginNameRef} type="text" autoComplete="off" placeholder="GitHub" />
+            </label>
+          </div>
+
+          <div>
+            <label>
+              Username
+              <input
+                ref={loginUsernameRef}
+                type="text"
+                autoComplete="off"
+                placeholder="you@example.com"
+              />
+            </label>
+          </div>
+
+          <div>
+            <label>
+              Password
+              <input
+                ref={loginPasswordRef}
+                type="password"
+                autoComplete="off"
+                placeholder="Password"
+              />
+            </label>
+          </div>
+
+          <div>
+            <label>
+              URL
+              <input
+                ref={loginUrlRef}
+                type="url"
+                autoComplete="off"
+                placeholder="https://example.com"
+              />
+            </label>
+          </div>
+
+          <div>
+            <label>
+              Notes
+              <textarea ref={loginNotesRef} placeholder="Optional notes" />
+            </label>
+          </div>
+
+          <button type="button" disabled={loading} onClick={handleCreateLoginItem}>
+            Save login
+          </button>
+
+          <hr />
+
+          <h3>Vault items</h3>
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              void refreshVaultItems();
+            }}
+          >
+            Refresh
+          </button>
+
+          {vaultItems.length === 0 ? (
+            <p>No saved items yet.</p>
+          ) : (
+            <ul>
+              {vaultItems.map((item) => (
+                <li key={item.id}>
+                  <code>{item.id}</code>
+                  {' — revision '}
+                  {item.revisionNumber}{' '}
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      void handleViewLoginItem(item.id);
+                    }}
+                  >
+                    View
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {selectedLogin && selectedItemId && (
+            <>
+              <hr />
+
+              <h3>Decrypted login</h3>
+
+              <p>
+                <strong>Item ID:</strong> <code>{selectedItemId}</code>
+              </p>
+
+              <p>
+                <strong>Name:</strong> {selectedLogin.name}
+              </p>
+
+              <p>
+                <strong>Username:</strong> {selectedLogin.username}
+              </p>
+
+              <p>
+                <strong>Password:</strong> <code>{selectedLogin.password}</code>
+              </p>
+
+              <p>
+                <strong>URLs:</strong>
+              </p>
+
+              {selectedLogin.urls.length === 0 ? (
+                <p>None</p>
+              ) : (
+                <ul>
+                  {selectedLogin.urls.map((url) => (
+                    <li key={url}>{url}</li>
+                  ))}
+                </ul>
+              )}
+
+              <p>
+                <strong>Notes:</strong> {selectedLogin.notes}
+              </p>
+
+              <button type="button" onClick={handleCloseLoginItem}>
+                Close
+              </button>
+            </>
+          )}
+
+          <hr />
 
           <button type="button" onClick={handleLockVault}>
             Lock vault
