@@ -8,10 +8,23 @@ import {
 
 import './App.css';
 
-import { apiRequest } from './lib/api';
-import { createAccountBootstrap, type AccountBootstrapResult } from './lib/cryptoCore';
+import {
+  createAccountBootstrap,
+  type AccountBootstrapResult,
+  type UnlockedVault,
+} from './lib/cryptoCore';
+
+import {
+  getCurrentSession,
+  loginWithPasskey,
+  logout as logoutSession,
+  type AuthenticatedUser,
+} from './lib/authApi';
+import { ApiError, apiRequest } from './lib/api';
 import { bytesToBase64Url, wipeBytes } from './lib/encoding';
-import { downloadRecoveryKit, type RecoveryKit } from './lib/recoveryKit';
+import { downloadRecoveryKit, readRecoveryKit, type RecoveryKit } from './lib/recoveryKit';
+
+import { unlockVault } from './lib/vaultUnlock';
 
 interface StartRegistrationResponse {
   registrationId: string;
@@ -95,8 +108,72 @@ export default function App() {
 
   const webAuthnSupported = browserSupportsWebAuthn();
 
+  const [runtimeState, setRuntimeState] = useState<RuntimeState>('CHECKING_SESSION');
+
+  const [authenticatedUser, setAuthenticatedUser] = useState<AuthenticatedUser | null>(null);
+
+  const [recoveryKitLoaded, setRecoveryKitLoaded] = useState(false);
+
+  const recoveryKitRef = useRef<RecoveryKit | null>(null);
+
+  const recoveryKitFileRef = useRef<HTMLInputElement>(null);
+
+  const unlockMasterPasswordRef = useRef<HTMLInputElement>(null);
+
+  const unlockedVaultRef = useRef<UnlockedVault | null>(null);
+
+  type RuntimeState =
+    'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
+
+  function disposeUnlockedVault() {
+    const unlocked = unlockedVaultRef.current;
+
+    if (unlocked) {
+      unlocked.clear();
+      unlocked.free();
+
+      unlockedVaultRef.current = null;
+    }
+  }
+
   useEffect(() => {
+    let cancelled = false;
+
+    async function restoreSession() {
+      try {
+        const session = await getCurrentSession();
+
+        if (cancelled) {
+          return;
+        }
+
+        setAuthenticatedUser(session.user);
+
+        setRuntimeState('AUTHENTICATED_LOCKED');
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        if (error instanceof ApiError && error.status === 401) {
+          setRuntimeState('SIGNED_OUT');
+
+          return;
+        }
+
+        setError(error instanceof Error ? error.message : 'Session could not be restored.');
+
+        setRuntimeState('SESSION_UNAVAILABLE');
+      }
+    }
+
+    void restoreSession();
+
     return () => {
+      cancelled = true;
+
+      disposeUnlockedVault();
+
       const bootstrap = bootstrapRef.current;
 
       if (bootstrap) {
@@ -105,6 +182,8 @@ export default function App() {
 
         bootstrapRef.current = null;
       }
+
+      recoveryKitRef.current = null;
     };
   }, []);
 
@@ -354,6 +433,234 @@ export default function App() {
     }
   }
 
+  async function handlePasskeyLogin() {
+    setLoading(true);
+    resetMessages();
+
+    try {
+      const session = await loginWithPasskey();
+
+      setAuthenticatedUser(session.user);
+
+      setRuntimeState('AUTHENTICATED_LOCKED');
+
+      setMessage('Authentication successful. Your vault is still locked.');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Authentication failed.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function retrySessionRestore() {
+    setLoading(true);
+    resetMessages();
+
+    try {
+      const session = await getCurrentSession();
+
+      setAuthenticatedUser(session.user);
+
+      setRuntimeState('AUTHENTICATED_LOCKED');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Session could not be restored.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRecoveryKitFile(file: File | undefined) {
+    resetMessages();
+
+    if (!file) {
+      discardRecoveryKit();
+      return;
+    }
+
+    if (!authenticatedUser) {
+      setError('Authentication is required.');
+
+      return;
+    }
+
+    try {
+      const recoveryKit = await readRecoveryKit(file);
+
+      if (
+        recoveryKit.account.email.trim().toLowerCase() !==
+        authenticatedUser.email.trim().toLowerCase()
+      ) {
+        throw new Error('Recovery Kit belongs to a different account.');
+      }
+
+      recoveryKitRef.current = recoveryKit;
+
+      setRecoveryKitLoaded(true);
+
+      setMessage('Recovery Kit loaded locally. It has not been uploaded to the server.');
+    } catch (error) {
+      discardRecoveryKit();
+
+      setError(error instanceof Error ? error.message : 'Recovery Kit could not be loaded.');
+    }
+  }
+
+  async function handleUnlockVault() {
+    const user = authenticatedUser;
+
+    const recoveryKit = recoveryKitRef.current;
+
+    const masterPassword = unlockMasterPasswordRef.current?.value ?? '';
+
+    resetMessages();
+
+    if (!user || !recoveryKit) {
+      setError('Recovery Kit is required.');
+
+      return;
+    }
+
+    if (!masterPassword) {
+      setError('Master Password is required.');
+
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const unlocked = await unlockVault({
+        masterPassword,
+        recoveryKit,
+        authenticatedEmail: user.email,
+      });
+
+      disposeUnlockedVault();
+
+      unlockedVaultRef.current = unlocked;
+
+      /*
+       * Drop the Recovery Kit reference after
+       * successful unlock. It is no longer
+       * needed in memory.
+       */
+      discardRecoveryKit();
+
+      setRuntimeState('UNLOCKED');
+
+      setMessage('Vault unlocked locally.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        discardRecoveryKit();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Vault could not be unlocked.');
+    } finally {
+      if (unlockMasterPasswordRef.current) {
+        unlockMasterPasswordRef.current.value = '';
+      }
+
+      setLoading(false);
+    }
+  }
+
+  function handleLockVault() {
+    disposeUnlockedVault();
+    discardRecoveryKit();
+
+    setRuntimeState('AUTHENTICATED_LOCKED');
+
+    setMessage('Vault locked.');
+    setError('');
+  }
+
+  async function handleLogout() {
+    /*
+     * Local keys are destroyed immediately,
+     * even if the network request fails.
+     */
+    disposeUnlockedVault();
+    discardRecoveryKit();
+
+    setRuntimeState('AUTHENTICATED_LOCKED');
+
+    setLoading(true);
+    resetMessages();
+
+    try {
+      await logoutSession();
+
+      setAuthenticatedUser(null);
+
+      setRuntimeState('SIGNED_OUT');
+
+      setMessage('Signed out successfully.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        return;
+      }
+
+      setError('The vault was locked locally, but the server session could not be revoked.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function finishOnboarding() {
+    const bootstrap = bootstrapRef.current;
+
+    if (bootstrap) {
+      bootstrap.clear();
+      bootstrap.free();
+
+      bootstrapRef.current = null;
+    }
+
+    setRegistrationId(null);
+    setVerificationToken('');
+    setRegistrationToken(null);
+    setBootstrapToken(null);
+    setBootstrapOptions(null);
+
+    setRecoveryKitDownloaded(false);
+
+    setCompletedAccount(null);
+
+    setEmail('');
+
+    setMessage('Account created. Sign in with your passkey.');
+  }
+
+  function discardRecoveryKit() {
+    recoveryKitRef.current = null;
+    setRecoveryKitLoaded(false);
+
+    if (recoveryKitFileRef.current) {
+      recoveryKitFileRef.current.value = '';
+    }
+  }
+
   async function activateAccount() {
     const bootstrap = bootstrapRef.current;
 
@@ -447,124 +754,224 @@ export default function App() {
     <main>
       <h1>Password Manager</h1>
 
+      {runtimeState === 'CHECKING_SESSION' && (
+        <section>
+          <h2>Checking session</h2>
+          <p>Restoring your authenticated session…</p>
+        </section>
+      )}
+
+      {runtimeState === 'SESSION_UNAVAILABLE' && (
+        <section>
+          <h2>Session unavailable</h2>
+
+          <p>The application could not verify your session.</p>
+
+          <button type="button" disabled={loading} onClick={retrySessionRestore}>
+            Retry
+          </button>
+        </section>
+      )}
+
+      {runtimeState === 'AUTHENTICATED_LOCKED' && authenticatedUser && (
+        <section>
+          <h2>Vault locked</h2>
+
+          <p>
+            Signed in as <strong>{authenticatedUser.email}</strong>
+          </p>
+
+          <p>Your identity is authenticated, but your vault keys are not loaded.</p>
+
+          <label>
+            Recovery Kit
+            <input
+              ref={recoveryKitFileRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={(event) => {
+                void handleRecoveryKitFile(event.target.files?.[0]);
+              }}
+            />
+          </label>
+
+          {recoveryKitLoaded && (
+            <>
+              <input
+                ref={unlockMasterPasswordRef}
+                type="password"
+                placeholder="Master Password"
+                autoComplete="current-password"
+              />
+
+              <button type="button" disabled={loading} onClick={handleUnlockVault}>
+                Unlock vault
+              </button>
+            </>
+          )}
+
+          <button type="button" disabled={loading} onClick={handleLogout}>
+            Sign out
+          </button>
+        </section>
+      )}
+
+      {runtimeState === 'UNLOCKED' && authenticatedUser && (
+        <section>
+          <h2>Vault unlocked</h2>
+
+          <p>
+            Signed in as <strong>{authenticatedUser.email}</strong>
+          </p>
+
+          <p>Your vault keys are currently available only inside the local WASM crypto runtime.</p>
+
+          <button type="button" onClick={handleLockVault}>
+            Lock vault
+          </button>
+
+          <button type="button" disabled={loading} onClick={handleLogout}>
+            Sign out
+          </button>
+        </section>
+      )}
+
+      {runtimeState === 'SIGNED_OUT' && (
+        <>
+          {!registrationId && !completedAccount && (
+            <>
+              <section>
+                <h2>Sign in</h2>
+
+                <p>Authenticate with your passkey.</p>
+
+                <button
+                  type="button"
+                  disabled={loading || !webAuthnSupported}
+                  onClick={handlePasskeyLogin}
+                >
+                  Sign in with passkey
+                </button>
+              </section>
+
+              <section>
+                <h2>Create account</h2>
+
+                <input
+                  type="email"
+                  value={email}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+
+                <button
+                  type="button"
+                  disabled={loading || !email}
+                  onClick={startAccountRegistration}
+                >
+                  Start registration
+                </button>
+              </section>
+            </>
+          )}
+
+          {registrationId && !registrationToken && !bootstrapToken && !completedAccount && (
+            <section>
+              <h2>Verify email</h2>
+
+              <p>Copy the local verification token from the API terminal.</p>
+
+              <input
+                type="text"
+                value={verificationToken}
+                placeholder="Verification token"
+                onChange={(event) => setVerificationToken(event.target.value)}
+              />
+
+              <button type="button" disabled={loading || !verificationToken} onClick={verifyEmail}>
+                Verify email
+              </button>
+            </section>
+          )}
+
+          {registrationToken && !bootstrapToken && !completedAccount && (
+            <section>
+              <h2>Create passkey</h2>
+
+              <button
+                type="button"
+                disabled={loading || !webAuthnSupported}
+                onClick={registerPasskey}
+              >
+                Create passkey
+              </button>
+            </section>
+          )}
+
+          {bootstrapToken && !bootstrapOptions && !completedAccount && (
+            <section>
+              <h2>Protect your vault</h2>
+
+              <p>Your Master Password never leaves this browser.</p>
+
+              <input
+                ref={masterPasswordRef}
+                type="password"
+                placeholder="Master Password"
+                autoComplete="new-password"
+              />
+
+              <input
+                ref={confirmMasterPasswordRef}
+                type="password"
+                placeholder="Confirm Master Password"
+                autoComplete="new-password"
+              />
+
+              <button type="button" disabled={loading} onClick={prepareCryptoBootstrap}>
+                Create vault keys
+              </button>
+            </section>
+          )}
+
+          {bootstrapOptions && !recoveryKitDownloaded && !completedAccount && (
+            <section>
+              <h2>Save Recovery Kit</h2>
+
+              <p>Store it securely and separately from your Master Password.</p>
+
+              <button type="button" disabled={loading} onClick={saveRecoveryKit}>
+                Download Recovery Kit
+              </button>
+            </section>
+          )}
+
+          {bootstrapOptions && recoveryKitDownloaded && !completedAccount && (
+            <section>
+              <h2>Activate account</h2>
+
+              <button type="button" disabled={loading} onClick={activateAccount}>
+                Activate account
+              </button>
+            </section>
+          )}
+
+          {completedAccount && (
+            <section>
+              <h2>Account ready</h2>
+
+              <p>Your encrypted personal vault has been created.</p>
+
+              <button type="button" onClick={finishOnboarding}>
+                Continue to sign in
+              </button>
+            </section>
+          )}
+        </>
+      )}
+
       {!webAuthnSupported && <p role="alert">This browser does not support WebAuthn.</p>}
-
-      {!registrationId && (
-        <section>
-          <h2>Create account</h2>
-
-          <input
-            type="email"
-            value={email}
-            placeholder="you@example.com"
-            autoComplete="email"
-            onChange={(event) => setEmail(event.target.value)}
-          />
-
-          <button type="button" disabled={loading || !email} onClick={startAccountRegistration}>
-            Start registration
-          </button>
-        </section>
-      )}
-
-      {registrationId && !registrationToken && !bootstrapToken && !completedAccount && (
-        <section>
-          <h2>Verify email</h2>
-
-          <p>Copy the local verification token from the API terminal.</p>
-
-          <input
-            type="text"
-            value={verificationToken}
-            placeholder="Verification token"
-            onChange={(event) => setVerificationToken(event.target.value)}
-          />
-
-          <button type="button" disabled={loading || !verificationToken} onClick={verifyEmail}>
-            Verify email
-          </button>
-        </section>
-      )}
-
-      {registrationToken && !bootstrapToken && !completedAccount && (
-        <section>
-          <h2>Create passkey</h2>
-
-          <p>Windows Hello or your authenticator will ask you to create a passkey.</p>
-
-          <button type="button" disabled={loading || !webAuthnSupported} onClick={registerPasskey}>
-            Create passkey
-          </button>
-        </section>
-      )}
-
-      {bootstrapToken && !bootstrapOptions && !completedAccount && (
-        <section>
-          <h2>Protect your vault</h2>
-
-          <p>Your Master Password never leaves this browser.</p>
-
-          <input
-            ref={masterPasswordRef}
-            type="password"
-            placeholder="Master Password"
-            autoComplete="new-password"
-          />
-
-          <input
-            ref={confirmMasterPasswordRef}
-            type="password"
-            placeholder="Confirm Master Password"
-            autoComplete="new-password"
-          />
-
-          <button type="button" disabled={loading} onClick={prepareCryptoBootstrap}>
-            Create vault keys
-          </button>
-        </section>
-      )}
-
-      {bootstrapOptions && !recoveryKitDownloaded && !completedAccount && (
-        <section>
-          <h2>Save Recovery Kit</h2>
-
-          <p>
-            The Recovery Kit contains secrets required to recover access to your encrypted vault.
-            Store it securely and separately from your Master Password.
-          </p>
-
-          <button type="button" disabled={loading} onClick={saveRecoveryKit}>
-            Download Recovery Kit
-          </button>
-        </section>
-      )}
-
-      {bootstrapOptions && recoveryKitDownloaded && !completedAccount && (
-        <section>
-          <h2>Activate account</h2>
-
-          <p>
-            Your Recovery Kit has been saved. The server will receive only encrypted key envelopes
-            and KDF metadata.
-          </p>
-
-          <button type="button" disabled={loading} onClick={activateAccount}>
-            Activate account
-          </button>
-        </section>
-      )}
-
-      {completedAccount && (
-        <section>
-          <h2>Account ready</h2>
-
-          <p>Your encrypted personal vault has been created successfully.</p>
-
-          <p>
-            Account status: <strong>{completedAccount.status}</strong>
-          </p>
-        </section>
-      )}
 
       {message && <p>{message}</p>}
 
