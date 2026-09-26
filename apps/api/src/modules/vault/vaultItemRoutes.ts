@@ -5,6 +5,7 @@ import { requireSession } from '../auth/sessionMiddleware.js';
 import {
   createVaultItemController,
   createVaultItemRevisionController,
+  deleteVaultItemController,
   getVaultItemController,
   getVaultItemUpdateOptionsController,
   listVaultItemsController,
@@ -33,6 +34,8 @@ export function createVaultItemRouter() {
     requireSession,
     createVaultItemRevisionController,
   );
+
+  router.delete('/:vaultId/items/:itemId', requireSession, deleteVaultItemController);
 
   return router;
 }

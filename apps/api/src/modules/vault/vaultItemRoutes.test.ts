@@ -94,18 +94,19 @@ describe('encrypted vault item routes', () => {
     };
   }
 
-  async function createAuthenticatedVault() {
+  async function createAuthenticatedVault(suffix = randomUUID()) {
+    const email = `item-api-${suffix}@example.com`;
     const user = await prisma.user.create({
       data: {
-        email: 'item-api@example.com',
+        email: email,
 
-        normalizedEmail: 'item-api@example.com',
+        normalizedEmail: email,
 
         status: 'ACTIVE',
 
         emailVerifiedAt: new Date(),
 
-        webauthnUserId: 'item-api-webauthn',
+        webauthnUserId: `item-api-webauthn-${suffix}`,
       },
     });
 
@@ -739,5 +740,252 @@ describe('encrypted vault item routes', () => {
     const response = await request(app).get(`/api/v1/vaults/${vault.id}/items`);
 
     expect(response.status).toBe(401);
+  });
+
+  it('soft deletes an item without destroying encrypted history', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    const revisionBefore = await prisma.vaultItemRevision.findUniqueOrThrow({
+      where: {
+        itemId_revisionNumber: {
+          itemId,
+          revisionNumber: 1,
+        },
+      },
+    });
+
+    const envelopeBefore = await prisma.itemKeyEnvelope.findFirstOrThrow({
+      where: {
+        revisionId: revisionBefore.id,
+      },
+    });
+
+    const response = await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(response.status).toBe(200);
+
+    expect(response.body).toMatchObject({
+      id: itemId,
+      vaultId: vault.id,
+      revisionNumber: 1,
+    });
+
+    expect(response.body.deletedAt).toBeTypeOf('string');
+
+    const item = await prisma.vaultItem.findUniqueOrThrow({
+      where: {
+        id: itemId,
+      },
+    });
+
+    expect(item.deletedAt).not.toBeNull();
+
+    /*
+     * Content revision does not change merely
+     * because lifecycle state changed.
+     */
+    expect(item.currentRevisionNumber).toBe(1);
+
+    /*
+     * Encrypted history remains intact.
+     */
+    const revisionAfter = await prisma.vaultItemRevision.findUniqueOrThrow({
+      where: {
+        id: revisionBefore.id,
+      },
+    });
+
+    expect(Array.from(revisionAfter.ciphertext)).toEqual(Array.from(revisionBefore.ciphertext));
+
+    const envelopeAfter = await prisma.itemKeyEnvelope.findUniqueOrThrow({
+      where: {
+        id: envelopeBefore.id,
+      },
+    });
+
+    expect(Array.from(envelopeAfter.encryptedKey)).toEqual(Array.from(envelopeBefore.encryptedKey));
+  });
+
+  it('hides a soft deleted item from normal list and detail routes', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    const deleted = await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(deleted.status).toBe(200);
+
+    const listResponse = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(listResponse.status).toBe(200);
+
+    expect(listResponse.body.items).toHaveLength(0);
+
+    const detailResponse = await request(app)
+      .get(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(detailResponse.status).toBe(404);
+
+    expect(detailResponse.body.error.code).toBe('ITEM_NOT_FOUND');
+
+    /*
+     * Physical records still exist.
+     */
+    expect(
+      await prisma.vaultItemRevision.count({
+        where: {
+          itemId,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('allows an idempotent retry of the same delete', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    const first = await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(second.status).toBe(200);
+
+    expect(second.body.deletedAt).toBe(first.body.deletedAt);
+
+    expect(
+      await prisma.vaultItemRevision.count({
+        where: {
+          itemId,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('rejects a stale delete after the item was updated', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    /*
+     * Client A currently knows revision 1.
+     *
+     * Client B now creates revision 2.
+     */
+    const options = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(options.status).toBe(200);
+
+    const update = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+        revisionNumber: 2,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(encryptedFixture(61, 0xa2)),
+
+        ciphertext: encodeBase64Url(encryptedFixture(100, 0xb2)),
+      });
+
+    expect(update.status).toBe(201);
+
+    /*
+     * Client A tries deleting what it thinks
+     * is still revision 1.
+     */
+    const staleDelete = await request(app)
+      .delete(`/api/v1/vaults/${vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(staleDelete.status).toBe(409);
+
+    expect(staleDelete.body.error.code).toBe('ITEM_REVISION_CONFLICT');
+
+    const item = await prisma.vaultItem.findUniqueOrThrow({
+      where: {
+        id: itemId,
+      },
+    });
+
+    expect(item.currentRevisionNumber).toBe(2);
+
+    expect(item.deletedAt).toBeNull();
+
+    expect(
+      await prisma.vaultItemRevision.count({
+        where: {
+          itemId,
+        },
+      }),
+    ).toBe(2);
+  });
+
+  it('does not allow another user to delete the item', async () => {
+    const first = await createAuthenticatedVault();
+
+    const second = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(first.vault.id, first.token);
+
+    const response = await request(app)
+      .delete(`/api/v1/vaults/${first.vault.id}/items/${itemId}`)
+      .set('Cookie', `pm_session=${second.token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(response.status).toBe(404);
+
+    const item = await prisma.vaultItem.findUniqueOrThrow({
+      where: {
+        id: itemId,
+      },
+    });
+
+    expect(item.deletedAt).toBeNull();
   });
 });

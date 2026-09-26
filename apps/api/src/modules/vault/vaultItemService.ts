@@ -602,3 +602,98 @@ export async function createEncryptedVaultItemRevision(
     };
   });
 }
+
+export async function softDeleteVaultItem(
+  userId: string,
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+) {
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.vaultItem.findFirst({
+      where: {
+        id: itemId,
+        vaultId,
+
+        vault: {
+          userId,
+        },
+      },
+
+      select: {
+        id: true,
+        currentRevisionNumber: true,
+        deletedAt: true,
+      },
+    });
+
+    if (!item) {
+      throw new Error('ITEM_NOT_FOUND');
+    }
+
+    /*
+     * Revision comparison happens before
+     * idempotent delete handling.
+     *
+     * A stale client must not be able to
+     * delete a newer revision.
+     */
+    if (item.currentRevisionNumber !== expectedRevisionNumber) {
+      throw new Error('ITEM_REVISION_CONFLICT');
+    }
+
+    /*
+     * DELETE is idempotent for the same
+     * current revision.
+     *
+     * Useful when the original response
+     * was lost and the client retries.
+     */
+    if (item.deletedAt) {
+      return {
+        id: item.id,
+        vaultId,
+
+        revisionNumber: item.currentRevisionNumber,
+
+        deletedAt: item.deletedAt,
+      };
+    }
+
+    const deletedAt = new Date();
+
+    /*
+     * Atomic compare-and-set:
+     *
+     * - item must still be active
+     * - revision must still match
+     */
+    const deleted = await tx.vaultItem.updateMany({
+      where: {
+        id: itemId,
+        vaultId,
+
+        currentRevisionNumber: expectedRevisionNumber,
+
+        deletedAt: null,
+      },
+
+      data: {
+        deletedAt,
+      },
+    });
+
+    if (deleted.count !== 1) {
+      throw new Error('ITEM_REVISION_CONFLICT');
+    }
+
+    return {
+      id: item.id,
+      vaultId,
+
+      revisionNumber: expectedRevisionNumber,
+
+      deletedAt,
+    };
+  });
+}

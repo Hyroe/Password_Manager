@@ -59,3 +59,7 @@ export const encryptedVaultItemRevisionSchema = z.object({
 
   ciphertext: z.string().min(1).max(140_000),
 });
+
+export const vaultItemDeleteSchema = z.object({
+  expectedRevisionNumber: z.number().int().positive(),
+});

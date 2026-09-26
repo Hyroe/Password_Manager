@@ -6,6 +6,7 @@ import {
   encryptedVaultItemRevisionSchema,
   encryptedVaultItemSchema,
   vaultIdParamsSchema,
+  vaultItemDeleteSchema,
   vaultItemParamsSchema,
   vaultItemUpdateOptionsSchema,
 } from './vaultItemSchemas.js';
@@ -17,6 +18,7 @@ import {
   getVaultItemUpdateOptions,
   listEncryptedVaultItems,
   reserveVaultItem,
+  softDeleteVaultItem,
 } from './vaultItemService.js';
 
 function handleVaultItemError(error: unknown, res: Response): boolean {
@@ -399,6 +401,53 @@ export async function createVaultItemRevisionController(req: Request, res: Respo
     );
 
     res.status(201).json(result);
+  } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function deleteVaultItemController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const params = vaultItemParamsSchema.safeParse(req.params);
+
+  const body = vaultItemDeleteSchema.safeParse(req.body);
+
+  if (!params.success || !body.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+
+        message: 'Invalid vault item delete request.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const result = await softDeleteVaultItem(
+      req.auth.userId,
+      params.data.vaultId,
+      params.data.itemId,
+      body.data.expectedRevisionNumber,
+    );
+
+    res.status(200).json(result);
   } catch (error) {
     if (handleVaultItemError(error, res)) {
       return;
