@@ -4,7 +4,9 @@ import { requireSession } from '../auth/sessionMiddleware.js';
 
 import {
   createVaultItemController,
+  createVaultItemRevisionController,
   getVaultItemController,
+  getVaultItemUpdateOptionsController,
   listVaultItemsController,
   reserveVaultItemController,
 } from './vaultItemController.js';
@@ -19,6 +21,18 @@ export function createVaultItemRouter() {
   router.get('/:vaultId/items', requireSession, listVaultItemsController);
 
   router.get('/:vaultId/items/:itemId', requireSession, getVaultItemController);
+
+  router.post(
+    '/:vaultId/items/:itemId/revisions/options',
+    requireSession,
+    getVaultItemUpdateOptionsController,
+  );
+
+  router.post(
+    '/:vaultId/items/:itemId/revisions',
+    requireSession,
+    createVaultItemRevisionController,
+  );
 
   return router;
 }

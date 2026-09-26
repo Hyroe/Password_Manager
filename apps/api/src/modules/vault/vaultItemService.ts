@@ -375,3 +375,230 @@ export async function getEncryptedVaultItem(userId: string, vaultId: string, ite
 
   return buildEncryptedItemResponse(vaultId, item.id, item.currentRevisionNumber, vaultKeyVersion);
 }
+
+export async function getVaultItemUpdateOptions(
+  userId: string,
+  vaultId: string,
+  itemId: string,
+  expectedRevisionNumber: number,
+) {
+  const item = await prisma.vaultItem.findFirst({
+    where: {
+      id: itemId,
+      vaultId,
+      deletedAt: null,
+
+      vault: {
+        userId,
+      },
+    },
+
+    select: {
+      id: true,
+      currentRevisionNumber: true,
+    },
+  });
+
+  if (!item) {
+    throw new Error('ITEM_NOT_FOUND');
+  }
+
+  if (item.currentRevisionNumber !== expectedRevisionNumber) {
+    throw new Error('ITEM_REVISION_CONFLICT');
+  }
+
+  const vaultKeyEnvelope = await prisma.vaultKeyEnvelope.findFirst({
+    where: {
+      vaultId,
+    },
+
+    orderBy: {
+      vaultKeyVersion: 'desc',
+    },
+  });
+
+  if (!vaultKeyEnvelope) {
+    throw new Error('CRYPTO_STATE_INVALID');
+  }
+
+  const revisionNumber = expectedRevisionNumber + 1;
+
+  return {
+    vaultId,
+    itemId,
+
+    expectedRevisionNumber,
+    revisionNumber,
+
+    payloadVersion: ITEM_PAYLOAD_VERSION,
+
+    ciphertextVersion: ITEM_CIPHERTEXT_VERSION,
+
+    itemKeyVersion: ITEM_KEY_VERSION,
+
+    vaultKeyVersion: vaultKeyEnvelope.vaultKeyVersion,
+
+    envelopeVersion: ITEM_KEY_ENVELOPE_VERSION,
+
+    aad: {
+      itemKey: itemKeyAad(vaultId, itemId, revisionNumber, vaultKeyEnvelope.vaultKeyVersion),
+
+      payload: itemPayloadAad(vaultId, itemId, revisionNumber, ITEM_KEY_VERSION),
+    },
+  };
+}
+
+interface CreateEncryptedVaultItemRevisionInput {
+  expectedRevisionNumber: number;
+
+  revisionNumber: number;
+
+  payloadVersion: number;
+  ciphertextVersion: number;
+
+  itemKeyVersion: number;
+  vaultKeyVersion: number;
+
+  envelopeVersion: number;
+
+  itemKeyEnvelope: Uint8Array<ArrayBuffer>;
+
+  ciphertext: Uint8Array<ArrayBuffer>;
+}
+
+export async function createEncryptedVaultItemRevision(
+  userId: string,
+  vaultId: string,
+  itemId: string,
+  input: CreateEncryptedVaultItemRevisionInput,
+) {
+  if (input.itemKeyEnvelope.length !== ITEM_KEY_ENVELOPE_BYTES) {
+    throw new Error('INVALID_CRYPTO_MATERIAL');
+  }
+
+  if (
+    input.ciphertext.length < MIN_ITEM_CIPHERTEXT_BYTES ||
+    input.ciphertext.length > MAX_ITEM_CIPHERTEXT_BYTES
+  ) {
+    throw new Error('INVALID_CRYPTO_MATERIAL');
+  }
+
+  if (
+    input.itemKeyEnvelope[0] !== input.envelopeVersion ||
+    input.ciphertext[0] !== input.ciphertextVersion
+  ) {
+    throw new Error('INVALID_CRYPTO_MATERIAL');
+  }
+
+  if (input.revisionNumber !== input.expectedRevisionNumber + 1) {
+    throw new Error('ITEM_REVISION_CONFLICT');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.vaultItem.findFirst({
+      where: {
+        id: itemId,
+        vaultId,
+        deletedAt: null,
+
+        vault: {
+          userId,
+        },
+      },
+
+      select: {
+        id: true,
+        currentRevisionNumber: true,
+      },
+    });
+
+    if (!item) {
+      throw new Error('ITEM_NOT_FOUND');
+    }
+
+    if (item.currentRevisionNumber !== input.expectedRevisionNumber) {
+      throw new Error('ITEM_REVISION_CONFLICT');
+    }
+
+    const currentVaultKey = await tx.vaultKeyEnvelope.findFirst({
+      where: {
+        vaultId,
+      },
+
+      orderBy: {
+        vaultKeyVersion: 'desc',
+      },
+    });
+
+    if (!currentVaultKey) {
+      throw new Error('CRYPTO_STATE_INVALID');
+    }
+
+    if (currentVaultKey.vaultKeyVersion !== input.vaultKeyVersion) {
+      throw new Error('VAULT_KEY_VERSION_CHANGED');
+    }
+
+    /*
+     * Atomic compare-and-set.
+     *
+     * Only a client whose expected
+     * revision is still current can
+     * advance the item.
+     */
+    const claimed = await tx.vaultItem.updateMany({
+      where: {
+        id: itemId,
+        vaultId,
+
+        currentRevisionNumber: input.expectedRevisionNumber,
+
+        deletedAt: null,
+      },
+
+      data: {
+        currentRevisionNumber: input.revisionNumber,
+      },
+    });
+
+    if (claimed.count !== 1) {
+      throw new Error('ITEM_REVISION_CONFLICT');
+    }
+
+    const revision = await tx.vaultItemRevision.create({
+      data: {
+        itemId,
+
+        revisionNumber: input.revisionNumber,
+
+        payloadVersion: input.payloadVersion,
+
+        ciphertextVersion: input.ciphertextVersion,
+
+        ciphertext: input.ciphertext,
+      },
+    });
+
+    await tx.itemKeyEnvelope.create({
+      data: {
+        revisionId: revision.id,
+
+        itemKeyVersion: input.itemKeyVersion,
+
+        vaultKeyVersion: input.vaultKeyVersion,
+
+        envelopeVersion: input.envelopeVersion,
+
+        encryptedKey: input.itemKeyEnvelope,
+      },
+    });
+
+    return {
+      id: itemId,
+      vaultId,
+
+      revisionNumber: input.revisionNumber,
+
+      createdAt: revision.createdAt,
+    };
+  });
+}

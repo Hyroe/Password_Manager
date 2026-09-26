@@ -3,14 +3,18 @@ import type { Request, Response } from 'express';
 import { decodeCanonicalBase64UrlValue } from '../../lib/base64Url.js';
 
 import {
+  encryptedVaultItemRevisionSchema,
   encryptedVaultItemSchema,
   vaultIdParamsSchema,
   vaultItemParamsSchema,
+  vaultItemUpdateOptionsSchema,
 } from './vaultItemSchemas.js';
 
 import {
   createEncryptedVaultItem,
+  createEncryptedVaultItemRevision,
   getEncryptedVaultItem,
+  getVaultItemUpdateOptions,
   listEncryptedVaultItems,
   reserveVaultItem,
 } from './vaultItemService.js';
@@ -57,7 +61,7 @@ function handleVaultItemError(error: unknown, res: Response): boolean {
         error: {
           code: 'ITEM_REVISION_CONFLICT',
 
-          message: 'The item reservation has already been used.',
+          message: 'The item revision is stale or has already been used.',
         },
       });
 
@@ -280,6 +284,121 @@ export async function getVaultItemController(req: Request, res: Response) {
     );
 
     res.status(200).json(item);
+  } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function getVaultItemUpdateOptionsController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const params = vaultItemParamsSchema.safeParse(req.params);
+
+  const body = vaultItemUpdateOptionsSchema.safeParse(req.body);
+
+  if (!params.success || !body.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+
+        message: 'Invalid item revision request.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const result = await getVaultItemUpdateOptions(
+      req.auth.userId,
+      params.data.vaultId,
+      params.data.itemId,
+      body.data.expectedRevisionNumber,
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    if (handleVaultItemError(error, res)) {
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function createVaultItemRevisionController(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const params = vaultItemParamsSchema.safeParse(req.params);
+
+  const body = encryptedVaultItemRevisionSchema.safeParse(req.body);
+
+  if (!params.success || !body.success) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_REQUEST',
+
+        message: 'Invalid encrypted revision request.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    const itemKeyEnvelope = decodeCanonicalBase64UrlValue(body.data.itemKeyEnvelope);
+
+    const ciphertext = decodeCanonicalBase64UrlValue(body.data.ciphertext);
+
+    const result = await createEncryptedVaultItemRevision(
+      req.auth.userId,
+      params.data.vaultId,
+      params.data.itemId,
+      {
+        expectedRevisionNumber: body.data.expectedRevisionNumber,
+
+        revisionNumber: body.data.revisionNumber,
+
+        payloadVersion: body.data.payloadVersion,
+
+        ciphertextVersion: body.data.ciphertextVersion,
+
+        itemKeyVersion: body.data.itemKeyVersion,
+
+        vaultKeyVersion: body.data.vaultKeyVersion,
+
+        envelopeVersion: body.data.envelopeVersion,
+
+        itemKeyEnvelope,
+        ciphertext,
+      },
+    );
+
+    res.status(201).json(result);
   } catch (error) {
     if (handleVaultItemError(error, res)) {
       return;

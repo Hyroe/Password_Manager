@@ -52,6 +52,48 @@ describe('encrypted vault item routes', () => {
     await prisma.$disconnect();
   });
 
+  async function createCompletedItem(vaultId: string, token: string) {
+    const reservation = await request(app)
+      .post(`/api/v1/vaults/${vaultId}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    const itemKeyEnvelope = encryptedFixture(61, 0x61);
+
+    const ciphertext = encryptedFixture(96, 0x71);
+
+    const created = await request(app)
+      .post(`/api/v1/vaults/${vaultId}/items`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        itemId: reservation.body.itemId,
+
+        revisionNumber: 1,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(itemKeyEnvelope),
+
+        ciphertext: encodeBase64Url(ciphertext),
+      });
+
+    expect(created.status).toBe(201);
+
+    return {
+      itemId: reservation.body.itemId,
+
+      firstCiphertext: ciphertext,
+
+      firstEnvelope: itemKeyEnvelope,
+    };
+  }
+
   async function createAuthenticatedVault() {
     const user = await prisma.user.create({
       data: {
@@ -112,6 +154,202 @@ describe('encrypted vault item routes', () => {
       token,
     };
   }
+
+  it('returns crypto context for the next immutable revision', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    const response = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(response.status).toBe(200);
+
+    expect(response.body).toMatchObject({
+      vaultId: vault.id,
+      itemId,
+
+      expectedRevisionNumber: 1,
+      revisionNumber: 2,
+
+      payloadVersion: 1,
+      ciphertextVersion: 1,
+
+      itemKeyVersion: 1,
+      vaultKeyVersion: 1,
+
+      envelopeVersion: 1,
+    });
+
+    expect(response.body.aad.itemKey).toBe(
+      `pm:v1:item-key:vault:${vault.id}:item:${itemId}:revision:2:vault-key-version:1`,
+    );
+
+    expect(response.body.aad.payload).toBe(
+      `pm:v1:item-payload:vault:${vault.id}:item:${itemId}:revision:2:item-key-version:1`,
+    );
+  });
+
+  it('creates a new immutable item revision', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId, firstCiphertext, firstEnvelope } = await createCompletedItem(vault.id, token);
+
+    const options = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    const secondEnvelope = encryptedFixture(61, 0x81);
+
+    const secondCiphertext = encryptedFixture(112, 0x91);
+
+    const response = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+
+        revisionNumber: options.body.revisionNumber,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(secondEnvelope),
+
+        ciphertext: encodeBase64Url(secondCiphertext),
+      });
+
+    expect(response.status).toBe(201);
+
+    expect(response.body.revisionNumber).toBe(2);
+
+    const item = await prisma.vaultItem.findUniqueOrThrow({
+      where: {
+        id: itemId,
+      },
+    });
+
+    expect(item.currentRevisionNumber).toBe(2);
+
+    const revisions = await prisma.vaultItemRevision.findMany({
+      where: {
+        itemId,
+      },
+
+      orderBy: {
+        revisionNumber: 'asc',
+      },
+    });
+
+    expect(revisions).toHaveLength(2);
+
+    /*
+     * Revision 1 remains untouched.
+     */
+    expect(Array.from(revisions[0].ciphertext)).toEqual(Array.from(firstCiphertext));
+
+    expect(Array.from(revisions[1].ciphertext)).toEqual(Array.from(secondCiphertext));
+
+    const firstRevisionEnvelope = await prisma.itemKeyEnvelope.findFirstOrThrow({
+      where: {
+        revisionId: revisions[0].id,
+      },
+    });
+
+    expect(Array.from(firstRevisionEnvelope.encryptedKey)).toEqual(Array.from(firstEnvelope));
+  });
+
+  it('rejects a stale concurrent item update', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    /*
+     * Both clients read revision 1.
+     */
+    const firstOptions = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    const secondOptions = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+      });
+
+    expect(firstOptions.status).toBe(200);
+    expect(secondOptions.status).toBe(200);
+
+    const firstUpdate = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+        revisionNumber: 2,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(encryptedFixture(61, 0xa1)),
+
+        ciphertext: encodeBase64Url(encryptedFixture(100, 0xb1)),
+      });
+
+    expect(firstUpdate.status).toBe(201);
+
+    const staleUpdate = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/${itemId}/revisions`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        expectedRevisionNumber: 1,
+        revisionNumber: 2,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(encryptedFixture(61, 0xc1)),
+
+        ciphertext: encodeBase64Url(encryptedFixture(100, 0xd1)),
+      });
+
+    expect(staleUpdate.status).toBe(409);
+
+    expect(staleUpdate.body.error.code).toBe('ITEM_REVISION_CONFLICT');
+
+    expect(
+      await prisma.vaultItemRevision.count({
+        where: {
+          itemId,
+        },
+      }),
+    ).toBe(2);
+  });
 
   it('reserves an item and returns deterministic crypto context', async () => {
     const { vault, token } = await createAuthenticatedVault();
