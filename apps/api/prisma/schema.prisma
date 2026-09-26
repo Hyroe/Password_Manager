@@ -162,6 +162,7 @@ model Vault {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   keyEnvelopes VaultKeyEnvelope[]
+  vaultItems   VaultItem[]
 
   @@index([userId])
   @@map("vaults")
@@ -305,4 +306,65 @@ model Session {
   @@index([idleExpiresAt])
   @@index([absoluteExpiresAt])
   @@map("sessions")
+}
+
+model VaultItem {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  vaultId String @map("vault_id") @db.Uuid
+  vault   Vault  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  currentRevisionNumber Int @default(0) @map("current_revision_number")
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  revisions VaultItemRevision[]
+
+  @@index([vaultId, deletedAt])
+  @@index([vaultId, updatedAt])
+  @@map("vault_items")
+}
+
+model VaultItemRevision {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  itemId String    @map("item_id") @db.Uuid
+  item   VaultItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  revisionNumber Int @map("revision_number")
+
+  payloadVersion    Int @map("payload_version")
+  ciphertextVersion Int @map("ciphertext_version")
+
+  ciphertext Bytes
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  itemKeyEnvelopes ItemKeyEnvelope[]
+
+  @@unique([itemId, revisionNumber])
+  @@index([itemId, createdAt])
+  @@map("vault_item_revisions")
+}
+
+model ItemKeyEnvelope {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  revisionId String            @map("revision_id") @db.Uuid
+  revision   VaultItemRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  itemKeyVersion  Int @map("item_key_version")
+  vaultKeyVersion Int @map("vault_key_version")
+
+  envelopeVersion Int @map("envelope_version")
+
+  encryptedKey Bytes @map("encrypted_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([revisionId, vaultKeyVersion])
+  @@index([revisionId])
+  @@map("item_key_envelopes")
 }
