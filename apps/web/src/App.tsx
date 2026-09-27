@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 import {
   browserSupportsWebAuthn,
@@ -20,8 +20,11 @@ import {
   logout as logoutSession,
   type AuthenticatedUser,
 } from './lib/authApi';
+
 import { ApiError, apiRequest } from './lib/api';
+
 import { bytesToBase64Url, wipeBytes } from './lib/encoding';
+
 import { downloadRecoveryKit, readRecoveryKit, type RecoveryKit } from './lib/recoveryKit';
 
 import { unlockVault } from './lib/vaultUnlock';
@@ -33,7 +36,6 @@ import type { EncryptedVaultItem } from './lib/vaultItemApi';
 import {
   createLoginVaultItem,
   deleteVaultItem,
-  listVaultItems,
   listVaultItemsIncludingDeleted,
   loadAndDecryptLoginItem,
   restoreVaultItem,
@@ -53,6 +55,7 @@ interface VerifyEmailResponse {
 
 interface PasskeyOptionsResponse {
   challengeId: string;
+
   options: PublicKeyCredentialCreationOptionsJSON;
 }
 
@@ -64,16 +67,20 @@ interface CryptoBootstrapOptionsResponse {
   bootstrapContextId: string;
 
   cryptoProfileId: string;
+
   vaultId: string;
 
   protocolVersion: number;
 
   kdf: {
     algorithm: 'ARGON2ID';
+
     profileVersion: number;
 
     memoryKib: number;
+
     iterations: number;
+
     parallelism: number;
 
     saltBytes: number;
@@ -83,14 +90,18 @@ interface CryptoBootstrapOptionsResponse {
     version: number;
 
     rootKeyAad: string;
+
     recoveryRootKeyAad: string;
+
     vaultKeyAad: string;
   };
 }
 
 interface CompleteBootstrapResponse {
   userId: string;
+
   vaultId: string;
+
   status: 'ACTIVE';
 }
 
@@ -114,7 +125,9 @@ export default function App() {
   const [completedAccount, setCompletedAccount] = useState<CompleteBootstrapResponse | null>(null);
 
   const [message, setMessage] = useState('');
+
   const [error, setError] = useState('');
+
   const [loading, setLoading] = useState(false);
 
   const masterPasswordRef = useRef<HTMLInputElement>(null);
@@ -173,10 +186,151 @@ export default function App() {
 
   const vaultSyncCursorRef = useRef<string | null>(null);
 
+  const vaultSyncInFlightRef = useRef(false);
+
+  const vaultItemsRef = useRef<EncryptedVaultItem[]>([]);
+
+  const deletedVaultItemsRef = useRef<EncryptedVaultItem[]>([]);
+
+  const selectedItemIdRef = useRef<string | null>(null);
+
   type RuntimeState =
     'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
 
-  function disposeUnlockedVault() {
+  const syncVaultItemsNow = useCallback(
+    async (showStatus: boolean) => {
+      const vaultId = unlockedVaultIdRef.current;
+
+      if (runtimeState !== 'UNLOCKED' || !vaultId || vaultSyncInFlightRef.current) {
+        return;
+      }
+
+      vaultSyncInFlightRef.current = true;
+
+      try {
+        let cursor = vaultSyncCursorRef.current ?? undefined;
+
+        let collections: VaultItemCollections = {
+          activeItems: vaultItemsRef.current,
+
+          deletedItems: deletedVaultItemsRef.current,
+        };
+
+        let receivedChanges = 0;
+
+        while (true) {
+          const result = await syncVaultItemChanges(vaultId, cursor);
+
+          receivedChanges += result.changes.length;
+
+          const currentSelectedItemId = selectedItemIdRef.current;
+
+          const selectedChanged =
+            currentSelectedItemId !== null &&
+            result.changes.some(
+              (change) =>
+                change.itemId === currentSelectedItemId &&
+                (change.kind === 'UPDATED' ||
+                  change.kind === 'DELETED' ||
+                  change.kind === 'RESTORED'),
+            );
+
+          if (selectedChanged) {
+            selectedItemIdRef.current = null;
+
+            setEditingLogin(false);
+            setSelectedLogin(null);
+            setSelectedItemId(null);
+          }
+
+          collections = applyVaultItemSyncChanges(collections, result.changes);
+
+          cursor = result.sync.nextCursor;
+
+          if (!result.sync.hasMore) {
+            break;
+          }
+        }
+
+        vaultItemsRef.current = collections.activeItems;
+
+        deletedVaultItemsRef.current = collections.deletedItems;
+
+        setVaultItems(collections.activeItems);
+
+        setDeletedVaultItems(collections.deletedItems);
+
+        vaultSyncCursorRef.current = cursor ?? null;
+
+        if (showStatus) {
+          setMessage(
+            receivedChanges === 0
+              ? 'Vault is already synchronized.'
+              : `Applied ${receivedChanges} vault change${receivedChanges === 1 ? '' : 's'}.`,
+          );
+        }
+      } finally {
+        vaultSyncInFlightRef.current = false;
+      }
+    },
+    [runtimeState],
+  );
+
+  const clearVaultUiState = useCallback(() => {
+    vaultItemsRef.current = [];
+    deletedVaultItemsRef.current = [];
+    selectedItemIdRef.current = null;
+    vaultSyncCursorRef.current = null;
+    vaultSyncInFlightRef.current = false;
+
+    setVaultItems([]);
+    setSelectedLogin(null);
+    setSelectedItemId(null);
+    setEditingLogin(false);
+    setDeletedVaultItems([]);
+
+    if (loginNameRef.current) {
+      loginNameRef.current.value = '';
+    }
+
+    if (loginUsernameRef.current) {
+      loginUsernameRef.current.value = '';
+    }
+
+    if (loginPasswordRef.current) {
+      loginPasswordRef.current.value = '';
+    }
+
+    if (loginUrlRef.current) {
+      loginUrlRef.current.value = '';
+    }
+
+    if (loginNotesRef.current) {
+      loginNotesRef.current.value = '';
+    }
+
+    if (editNameRef.current) {
+      editNameRef.current.value = '';
+    }
+
+    if (editUsernameRef.current) {
+      editUsernameRef.current.value = '';
+    }
+
+    if (editPasswordRef.current) {
+      editPasswordRef.current.value = '';
+    }
+
+    if (editUrlRef.current) {
+      editUrlRef.current.value = '';
+    }
+
+    if (editNotesRef.current) {
+      editNotesRef.current.value = '';
+    }
+  }, []);
+
+  const disposeUnlockedVault = useCallback(() => {
     const unlocked = unlockedVaultRef.current;
 
     if (unlocked) {
@@ -184,15 +338,37 @@ export default function App() {
       unlocked.free();
 
       unlockedVaultRef.current = null;
+
       unlockedVaultIdRef.current = null;
     }
-  }
+  }, []);
+
+  const handleBackgroundSyncError = useCallback(
+    async (error: unknown) => {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      console.error('Vault background sync failed.', error);
+    },
+    [clearVaultUiState, disposeUnlockedVault],
+  );
 
   async function handleDeleteLoginItem(itemId: string) {
     const vaultId = unlockedVaultIdRef.current;
 
     if (!vaultId) {
       setError('Vault is locked.');
+
       return;
     }
 
@@ -213,16 +389,22 @@ export default function App() {
     }
 
     resetMessages();
+
     setLoading(true);
 
     try {
       await deleteVaultItem(vaultId, itemId, item.revisionNumber);
 
       /*
+
        * Drop decrypted plaintext immediately
+
        * when the selected item is deleted.
+
        */
+
       if (selectedItemId === itemId) {
+        selectedItemIdRef.current = null;
         setEditingLogin(false);
         setSelectedLogin(null);
         setSelectedItemId(null);
@@ -234,6 +416,7 @@ export default function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
+
         clearVaultUiState();
 
         setAuthenticatedUser(null);
@@ -247,11 +430,17 @@ export default function App() {
 
       if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
         /*
+
          * Another client changed the item.
+
          * Do not allow this stale tab to keep
+
          * operating on the old plaintext.
+
          */
+
         if (selectedItemId === itemId) {
+          selectedItemIdRef.current = null;
           setEditingLogin(false);
           setSelectedLogin(null);
           setSelectedItemId(null);
@@ -260,7 +449,10 @@ export default function App() {
         try {
           await refreshVaultItems();
         } catch {
+          vaultItemsRef.current = [];
+          deletedVaultItemsRef.current = [];
           setVaultItems([]);
+          setDeletedVaultItems([]);
         }
 
         setError(
@@ -272,14 +464,13 @@ export default function App() {
 
       if (error instanceof ApiError && error.code === 'ITEM_NOT_FOUND') {
         if (selectedItemId === itemId) {
+          selectedItemIdRef.current = null;
           setEditingLogin(false);
           setSelectedLogin(null);
           setSelectedItemId(null);
         }
 
-        const latest = await listVaultItems(vaultId).catch(() => []);
-
-        setVaultItems(latest);
+        await refreshVaultItems();
 
         setError('This item no longer exists in the active vault.');
 
@@ -334,6 +525,7 @@ export default function App() {
 
       if (bootstrap) {
         bootstrap.clear();
+
         bootstrap.free();
 
         bootstrapRef.current = null;
@@ -341,10 +533,23 @@ export default function App() {
 
       recoveryKitRef.current = null;
     };
-  }, []);
+  }, [disposeUnlockedVault]);
+
+  useEffect(() => {
+    vaultItemsRef.current = vaultItems;
+  }, [vaultItems]);
+
+  useEffect(() => {
+    deletedVaultItemsRef.current = deletedVaultItems;
+  }, [deletedVaultItems]);
+
+  useEffect(() => {
+    selectedItemIdRef.current = selectedItemId;
+  }, [selectedItemId]);
 
   function resetMessages() {
     setError('');
+
     setMessage('');
   }
 
@@ -358,7 +563,6 @@ export default function App() {
 
     let collections: VaultItemCollections = {
       activeItems: allItems.filter((item) => item.deletedAt === null),
-
       deletedItems: allItems.filter((item) => item.deletedAt !== null),
     };
 
@@ -375,7 +579,6 @@ export default function App() {
       const result = await syncVaultItemChanges(vaultId, cursor);
 
       collections = applyVaultItemSyncChanges(collections, result.changes);
-
       cursor = result.sync.nextCursor;
 
       if (!result.sync.hasMore) {
@@ -383,69 +586,24 @@ export default function App() {
       }
     }
 
-    setVaultItems(collections.activeItems);
+    vaultItemsRef.current = collections.activeItems;
+    deletedVaultItemsRef.current = collections.deletedItems;
 
+    setVaultItems(collections.activeItems);
     setDeletedVaultItems(collections.deletedItems);
 
     vaultSyncCursorRef.current = cursor ?? null;
   }
 
-  function clearVaultUiState() {
-    setVaultItems([]);
-    setSelectedLogin(null);
-    setSelectedItemId(null);
-    setEditingLogin(false);
-    setDeletedVaultItems([]);
-    vaultSyncCursorRef.current = null;
-
-    if (loginNameRef.current) {
-      loginNameRef.current.value = '';
-    }
-
-    if (loginUsernameRef.current) {
-      loginUsernameRef.current.value = '';
-    }
-
-    if (loginPasswordRef.current) {
-      loginPasswordRef.current.value = '';
-    }
-
-    if (loginUrlRef.current) {
-      loginUrlRef.current.value = '';
-    }
-
-    if (loginNotesRef.current) {
-      loginNotesRef.current.value = '';
-    }
-
-    if (editNameRef.current) {
-      editNameRef.current.value = '';
-    }
-
-    if (editUsernameRef.current) {
-      editUsernameRef.current.value = '';
-    }
-
-    if (editPasswordRef.current) {
-      editPasswordRef.current.value = '';
-    }
-
-    if (editUrlRef.current) {
-      editUrlRef.current.value = '';
-    }
-
-    if (editNotesRef.current) {
-      editNotesRef.current.value = '';
-    }
-  }
-
   async function startAccountRegistration() {
     setLoading(true);
+
     resetMessages();
 
     try {
       const response = await apiRequest<StartRegistrationResponse>('/api/v1/accounts', {
         method: 'POST',
+
         body: JSON.stringify({
           email,
         }),
@@ -467,13 +625,16 @@ export default function App() {
     }
 
     setLoading(true);
+
     resetMessages();
 
     try {
       const response = await apiRequest<VerifyEmailResponse>('/api/v1/accounts/verify-email', {
         method: 'POST',
+
         body: JSON.stringify({
           registrationId,
+
           token: verificationToken,
         }),
       });
@@ -494,15 +655,19 @@ export default function App() {
     }
 
     setLoading(true);
+
     resetMessages();
 
     try {
       const optionsResponse = await apiRequest<PasskeyOptionsResponse>(
         '/api/v1/auth/passkeys/register/options',
+
         {
           method: 'POST',
+
           body: JSON.stringify({
             registrationId,
+
             registrationToken,
           }),
         },
@@ -514,12 +679,17 @@ export default function App() {
 
       const verifyResponse = await apiRequest<PasskeyVerifyResponse>(
         '/api/v1/auth/passkeys/register/verify',
+
         {
           method: 'POST',
+
           body: JSON.stringify({
             registrationId,
+
             registrationToken,
+
             challengeId: optionsResponse.challengeId,
+
             credential,
           }),
         },
@@ -563,10 +733,13 @@ export default function App() {
     try {
       const options = await apiRequest<CryptoBootstrapOptionsResponse>(
         '/api/v1/accounts/crypto/options',
+
         {
           method: 'POST',
+
           body: JSON.stringify({
             registrationId,
+
             bootstrapToken,
           }),
         },
@@ -593,6 +766,7 @@ export default function App() {
 
       if (!policyMatches) {
         bootstrap.clear();
+
         bootstrap.free();
 
         throw new Error('Crypto protocol mismatch between client and server.');
@@ -602,12 +776,14 @@ export default function App() {
 
       if (previousBootstrap) {
         previousBootstrap.clear();
+
         previousBootstrap.free();
       }
 
       bootstrapRef.current = bootstrap;
 
       setBootstrapOptions(options);
+
       setRecoveryKitDownloaded(false);
 
       setMessage(
@@ -644,13 +820,16 @@ export default function App() {
     try {
       const recoveryKit: RecoveryKit = {
         format: 'PM_RECOVERY_KIT',
+
         formatVersion: 1,
 
         createdAt: new Date().toISOString(),
 
         account: {
           email,
+
           cryptoProfileId: bootstrapOptions.cryptoProfileId,
+
           vaultId: bootstrapOptions.vaultId,
         },
 
@@ -676,12 +855,42 @@ export default function App() {
       );
     } finally {
       wipeBytes(accountSecret);
+
       wipeBytes(recoveryKey);
     }
   }
 
+  useEffect(() => {
+    if (runtimeState !== 'UNLOCKED') {
+      return;
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+
+      void syncVaultItemsNow(false).catch(handleBackgroundSyncError);
+    }
+
+    function handleWindowFocus() {
+      void syncVaultItemsNow(false).catch(handleBackgroundSyncError);
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [runtimeState, syncVaultItemsNow, handleBackgroundSyncError]);
+
   async function handlePasskeyLogin() {
     setLoading(true);
+
     resetMessages();
 
     try {
@@ -701,6 +910,7 @@ export default function App() {
 
   async function retrySessionRestore() {
     setLoading(true);
+
     resetMessages();
 
     try {
@@ -729,6 +939,7 @@ export default function App() {
 
     if (!file) {
       discardRecoveryKit();
+
       return;
     }
 
@@ -761,77 +972,18 @@ export default function App() {
   }
 
   async function handleSyncVaultItems() {
-    const vaultId = unlockedVaultIdRef.current;
-
-    if (!vaultId) {
-      setError('Vault is locked.');
-
-      return;
-    }
-
     resetMessages();
+
     setLoading(true);
 
     try {
-      let cursor = vaultSyncCursorRef.current ?? undefined;
-
-      let collections: VaultItemCollections = {
-        activeItems: vaultItems,
-
-        deletedItems: deletedVaultItems,
-      };
-
-      let receivedChanges = 0;
-
-      while (true) {
-        const result = await syncVaultItemChanges(vaultId, cursor);
-
-        const selectedChanged =
-          selectedItemId !== null &&
-          result.changes.some(
-            (change) =>
-              change.itemId === selectedItemId &&
-              (change.kind === 'UPDATED' ||
-                change.kind === 'DELETED' ||
-                change.kind === 'RESTORED'),
-          );
-
-        if (selectedChanged) {
-          setEditingLogin(false);
-
-          setSelectedLogin(null);
-          setSelectedItemId(null);
-        }
-
-        receivedChanges += result.changes.length;
-
-        collections = applyVaultItemSyncChanges(collections, result.changes);
-
-        /*
-         * Only advance after this page was
-         * successfully applied.
-         */
-        cursor = result.sync.nextCursor;
-
-        if (!result.sync.hasMore) {
-          break;
-        }
-      }
-
-      setVaultItems(collections.activeItems);
-
-      setDeletedVaultItems(collections.deletedItems);
-
-      vaultSyncCursorRef.current = cursor ?? null;
-
-      setMessage(
-        receivedChanges === 0
-          ? 'Vault is already synchronized.'
-          : `Applied ${receivedChanges} vault change${receivedChanges === 1 ? '' : 's'}.`,
-      );
+      await syncVaultItemsNow(true);
     } catch (error) {
+      const vaultId = unlockedVaultIdRef.current;
+
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
+
         clearVaultUiState();
 
         setAuthenticatedUser(null);
@@ -843,17 +995,19 @@ export default function App() {
         return;
       }
 
-      /*
-       * If local sync state became
-       * inconsistent, rebuild from server.
-       */
-      try {
-        await bootstrapVaultSync(vaultId);
+      if (vaultId) {
+        try {
+          await bootstrapVaultSync(vaultId);
 
-        setError('Vault sync state was rebuilt from the server.');
-      } catch {
-        setError(error instanceof Error ? error.message : 'Vault synchronization failed.');
+          setError('Vault sync state was rebuilt from the server.');
+
+          return;
+        } catch {
+          // Fall through to original error.
+        }
       }
+
+      setError(error instanceof Error ? error.message : 'Vault synchronization failed.');
     } finally {
       setLoading(false);
     }
@@ -885,19 +1039,28 @@ export default function App() {
     try {
       const unlocked = await unlockVault({
         masterPassword,
+
         recoveryKit,
+
         authenticatedEmail: user.email,
       });
 
       disposeUnlockedVault();
 
       unlockedVaultRef.current = unlocked;
+
       unlockedVaultIdRef.current = recoveryKit.account.vaultId;
+
       /*
+
        * Drop the Recovery Kit reference after
+
        * successful unlock. It is no longer
+
        * needed in memory.
+
        */
+
       discardRecoveryKit();
 
       setRuntimeState('UNLOCKED');
@@ -905,8 +1068,12 @@ export default function App() {
       try {
         await bootstrapVaultSync(recoveryKit.account.vaultId);
       } catch {
-        setVaultItems([]);
+        vaultItemsRef.current = [];
+        deletedVaultItemsRef.current = [];
+        vaultSyncCursorRef.current = null;
 
+        setVaultItems([]);
+        setDeletedVaultItems([]);
         setError('Vault unlocked, but items could not be loaded.');
       }
 
@@ -914,6 +1081,7 @@ export default function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
+
         discardRecoveryKit();
 
         setAuthenticatedUser(null);
@@ -937,12 +1105,15 @@ export default function App() {
 
   function handleLockVault() {
     disposeUnlockedVault();
+
     discardRecoveryKit();
+
     clearVaultUiState();
 
     setRuntimeState('AUTHENTICATED_LOCKED');
 
     setMessage('Vault locked.');
+
     setError('');
   }
 
@@ -953,6 +1124,7 @@ export default function App() {
 
     if (!vault || !vaultId) {
       setError('Vault is locked.');
+
       return;
     }
 
@@ -979,7 +1151,9 @@ export default function App() {
     try {
       await createLoginVaultItem(vault, vaultId, {
         name,
+
         username,
+
         password,
 
         urls: url.length > 0 ? [url] : [],
@@ -988,9 +1162,13 @@ export default function App() {
       });
 
       /*
+
        * Remove plaintext from the form as
+
        * soon as persistence succeeds.
+
        */
+
       if (loginNameRef.current) {
         loginNameRef.current.value = '';
       }
@@ -1012,13 +1190,16 @@ export default function App() {
       }
 
       setSelectedLogin(null);
+      selectedItemIdRef.current = null;
       setSelectedItemId(null);
 
       await refreshVaultItems();
+
       setMessage('Login encrypted and saved.');
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
+
         clearVaultUiState();
 
         setAuthenticatedUser(null);
@@ -1033,9 +1214,13 @@ export default function App() {
       setError(error instanceof Error ? error.message : 'Login could not be saved.');
     } finally {
       /*
+
        * Always remove the password from
+
        * the DOM after an attempt.
+
        */
+
       if (loginPasswordRef.current) {
         loginPasswordRef.current.value = '';
       }
@@ -1051,17 +1236,24 @@ export default function App() {
 
     if (!vault || !vaultId) {
       setError('Vault is locked.');
+
       return;
     }
 
     setLoading(true);
+
     resetMessages();
 
     /*
+
      * Drop any previously decrypted item
+
      * before loading another one.
+
      */
+
     setSelectedLogin(null);
+    selectedItemIdRef.current = null;
     setSelectedItemId(null);
     setEditingLogin(false);
 
@@ -1069,10 +1261,12 @@ export default function App() {
       const login = await loadAndDecryptLoginItem(vault, vaultId, itemId);
 
       setSelectedLogin(login);
+      selectedItemIdRef.current = itemId;
       setSelectedItemId(itemId);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
+
         clearVaultUiState();
 
         setAuthenticatedUser(null);
@@ -1091,6 +1285,7 @@ export default function App() {
   }
 
   function handleCloseLoginItem() {
+    selectedItemIdRef.current = null;
     setEditingLogin(false);
     setSelectedLogin(null);
     setSelectedItemId(null);
@@ -1102,6 +1297,7 @@ export default function App() {
     }
 
     setEditingLogin(true);
+
     resetMessages();
   }
 
@@ -1127,12 +1323,19 @@ export default function App() {
     }
 
     /*
+
      * The revision displayed in this tab is
+
      * the revision this edit is based on.
+
      *
+
      * If another tab/client already changed
+
      * it, the backend will return 409.
+
      */
+
     const itemMetadata = vaultItems.find((item) => item.id === itemId);
 
     if (!itemMetadata) {
@@ -1164,14 +1367,18 @@ export default function App() {
     try {
       const updated = await updateLoginVaultItem(
         vault,
+
         vaultId,
+
         itemId,
 
         itemMetadata.revisionNumber,
 
         {
           name,
+
           username,
+
           password,
 
           urls: url.length > 0 ? [url] : [],
@@ -1181,11 +1388,17 @@ export default function App() {
       );
 
       /*
+
        * Read the newly persisted revision
+
        * back from the server and decrypt it,
+
        * rather than trusting only our local
+
        * draft.
+
        */
+
       await refreshVaultItems();
 
       const refreshedLogin = await loadAndDecryptLoginItem(vault, vaultId, itemId);
@@ -1198,6 +1411,7 @@ export default function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
+
         clearVaultUiState();
 
         setAuthenticatedUser(null);
@@ -1211,9 +1425,14 @@ export default function App() {
 
       if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
         /*
+
          * Do not let the stale editor remain
+
          * open after a concurrency conflict.
+
          */
+
+        selectedItemIdRef.current = null;
         setEditingLogin(false);
         setSelectedLogin(null);
         setSelectedItemId(null);
@@ -1221,7 +1440,10 @@ export default function App() {
         try {
           await refreshVaultItems();
         } catch {
+          vaultItemsRef.current = [];
+          deletedVaultItemsRef.current = [];
           setVaultItems([]);
+          setDeletedVaultItems([]);
         }
 
         setError(
@@ -1234,9 +1456,13 @@ export default function App() {
       setError(error instanceof Error ? error.message : 'Login could not be updated.');
     } finally {
       /*
+
        * Password plaintext should not remain
+
        * in an edit field after a save attempt.
+
        */
+
       if (editPasswordRef.current) {
         editPasswordRef.current.value = '';
       }
@@ -1250,6 +1476,7 @@ export default function App() {
 
     if (!vaultId) {
       setError('Vault is locked.');
+
       return;
     }
 
@@ -1262,6 +1489,7 @@ export default function App() {
     }
 
     resetMessages();
+
     setLoading(true);
 
     try {
@@ -1273,6 +1501,7 @@ export default function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
+
         clearVaultUiState();
 
         setAuthenticatedUser(null);
@@ -1308,16 +1537,23 @@ export default function App() {
 
   async function handleLogout() {
     /*
+
      * Local keys are destroyed immediately,
+
      * even if the network request fails.
+
      */
+
     disposeUnlockedVault();
+
     discardRecoveryKit();
+
     clearVaultUiState();
 
     setRuntimeState('AUTHENTICATED_LOCKED');
 
     setLoading(true);
+
     resetMessages();
 
     try {
@@ -1345,7 +1581,6 @@ export default function App() {
 
   async function refreshVaultItems() {
     const vault = unlockedVaultRef.current;
-
     const vaultId = unlockedVaultIdRef.current;
 
     if (!vault || !vaultId) {
@@ -1355,18 +1590,21 @@ export default function App() {
     try {
       const allItems = await listVaultItemsIncludingDeleted(vaultId);
 
-      setVaultItems(allItems.filter((item) => item.deletedAt === null));
+      const activeItems = allItems.filter((item) => item.deletedAt === null);
+      const deletedItems = allItems.filter((item) => item.deletedAt !== null);
 
-      setDeletedVaultItems(allItems.filter((item) => item.deletedAt !== null));
+      vaultItemsRef.current = activeItems;
+      deletedVaultItemsRef.current = deletedItems;
+
+      setVaultItems(activeItems);
+      setDeletedVaultItems(deletedItems);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
         clearVaultUiState();
 
         setAuthenticatedUser(null);
-
         setRuntimeState('SIGNED_OUT');
-
         setError('Your session has expired. Authenticate again.');
 
         return;
@@ -1381,15 +1619,20 @@ export default function App() {
 
     if (bootstrap) {
       bootstrap.clear();
+
       bootstrap.free();
 
       bootstrapRef.current = null;
     }
 
     setRegistrationId(null);
+
     setVerificationToken('');
+
     setRegistrationToken(null);
+
     setBootstrapToken(null);
+
     setBootstrapOptions(null);
 
     setRecoveryKitDownloaded(false);
@@ -1403,6 +1646,7 @@ export default function App() {
 
   function discardRecoveryKit() {
     recoveryKitRef.current = null;
+
     setRecoveryKitLoaded(false);
 
     if (recoveryKitFileRef.current) {
@@ -1424,6 +1668,7 @@ export default function App() {
     }
 
     setLoading(true);
+
     resetMessages();
 
     const kdfSalt = bootstrap.kdf_salt();
@@ -1437,11 +1682,13 @@ export default function App() {
     try {
       const response = await apiRequest<CompleteBootstrapResponse>(
         '/api/v1/accounts/crypto/complete',
+
         {
           method: 'POST',
 
           body: JSON.stringify({
             registrationId,
+
             bootstrapToken,
 
             bootstrapContextId: bootstrapOptions.bootstrapContextId,
@@ -1476,12 +1723,15 @@ export default function App() {
       );
 
       bootstrap.clear();
+
       bootstrap.free();
 
       bootstrapRef.current = null;
 
       setBootstrapToken(null);
+
       setRegistrationToken(null);
+
       setVerificationToken('');
 
       setCompletedAccount(response);
@@ -1491,8 +1741,11 @@ export default function App() {
       setError(err instanceof Error ? err.message : 'Account activation failed.');
     } finally {
       wipeBytes(kdfSalt);
+
       wipeBytes(rootKeyEnvelope);
+
       wipeBytes(recoveryRootKeyEnvelope);
+
       wipeBytes(vaultKeyEnvelope);
 
       setLoading(false);
@@ -1506,6 +1759,7 @@ export default function App() {
       {runtimeState === 'CHECKING_SESSION' && (
         <section>
           <h2>Checking session</h2>
+
           <p>Restoring your authenticated session…</p>
         </section>
       )}
@@ -1536,8 +1790,11 @@ export default function App() {
             Recovery Kit
             <input
               ref={recoveryKitFileRef}
+
               type="file"
+
               accept=".json,application/json"
+
               onChange={(event) => {
                 void handleRecoveryKitFile(event.target.files?.[0]);
               }}
@@ -1548,8 +1805,11 @@ export default function App() {
             <>
               <input
                 ref={unlockMasterPasswordRef}
+
                 type="password"
+
                 placeholder="Master Password"
+
                 autoComplete="current-password"
               />
 
@@ -1591,8 +1851,11 @@ export default function App() {
               Username
               <input
                 ref={loginUsernameRef}
+
                 type="text"
+
                 autoComplete="off"
+
                 placeholder="you@example.com"
               />
             </label>
@@ -1603,8 +1866,11 @@ export default function App() {
               Password
               <input
                 ref={loginPasswordRef}
+
                 type="password"
+
                 autoComplete="off"
+
                 placeholder="Password"
               />
             </label>
@@ -1615,8 +1881,11 @@ export default function App() {
               URL
               <input
                 ref={loginUrlRef}
+
                 type="url"
+
                 autoComplete="off"
+
                 placeholder="https://example.com"
               />
             </label>
@@ -1639,7 +1908,9 @@ export default function App() {
 
           <button
             type="button"
+
             disabled={loading}
+
             onClick={() => {
               void refreshVaultItems();
             }}
@@ -1658,7 +1929,9 @@ export default function App() {
                   {item.revisionNumber}{' '}
                   <button
                     type="button"
+
                     disabled={loading}
+
                     onClick={() => {
                       void handleViewLoginItem(item.id);
                     }}
@@ -1667,7 +1940,9 @@ export default function App() {
                   </button>{' '}
                   <button
                     type="button"
+
                     disabled={loading}
+
                     onClick={() => {
                       void handleDeleteLoginItem(item.id);
                     }}
@@ -1696,7 +1971,9 @@ export default function App() {
                   {item.deletedAt ? new Date(item.deletedAt).toLocaleString() : ''}{' '}
                   <button
                     type="button"
+
                     disabled={loading}
+
                     onClick={() => {
                       void handleRestoreLoginItem(item.id);
                     }}
@@ -1756,7 +2033,9 @@ export default function App() {
 
                   <button
                     type="button"
+
                     disabled={loading}
+
                     onClick={() => {
                       void handleDeleteLoginItem(selectedItemId);
                     }}
@@ -1777,8 +2056,11 @@ export default function App() {
                       Name
                       <input
                         ref={editNameRef}
+
                         type="text"
+
                         autoComplete="off"
+
                         defaultValue={selectedLogin.name}
                       />
                     </label>
@@ -1789,8 +2071,11 @@ export default function App() {
                       Username
                       <input
                         ref={editUsernameRef}
+
                         type="text"
+
                         autoComplete="off"
+
                         defaultValue={selectedLogin.username}
                       />
                     </label>
@@ -1801,8 +2086,11 @@ export default function App() {
                       Password
                       <input
                         ref={editPasswordRef}
+
                         type="password"
+
                         autoComplete="off"
+
                         defaultValue={selectedLogin.password}
                       />
                     </label>
@@ -1813,8 +2101,11 @@ export default function App() {
                       URL
                       <input
                         ref={editUrlRef}
+
                         type="url"
+
                         autoComplete="off"
+
                         defaultValue={selectedLogin.urls[0] ?? ''}
                       />
                     </label>
@@ -1843,7 +2134,9 @@ export default function App() {
 
           <button
             type="button"
+
             disabled={loading}
+
             onClick={() => {
               void handleSyncVaultItems();
             }}
@@ -1872,7 +2165,9 @@ export default function App() {
 
                 <button
                   type="button"
+
                   disabled={loading || !webAuthnSupported}
+
                   onClick={handlePasskeyLogin}
                 >
                   Sign in with passkey
@@ -1884,15 +2179,21 @@ export default function App() {
 
                 <input
                   type="email"
+
                   value={email}
+
                   placeholder="you@example.com"
+
                   autoComplete="email"
+
                   onChange={(event) => setEmail(event.target.value)}
                 />
 
                 <button
                   type="button"
+
                   disabled={loading || !email}
+
                   onClick={startAccountRegistration}
                 >
                   Start registration
@@ -1909,8 +2210,11 @@ export default function App() {
 
               <input
                 type="text"
+
                 value={verificationToken}
+
                 placeholder="Verification token"
+
                 onChange={(event) => setVerificationToken(event.target.value)}
               />
 
@@ -1926,7 +2230,9 @@ export default function App() {
 
               <button
                 type="button"
+
                 disabled={loading || !webAuthnSupported}
+
                 onClick={registerPasskey}
               >
                 Create passkey
@@ -1942,15 +2248,21 @@ export default function App() {
 
               <input
                 ref={masterPasswordRef}
+
                 type="password"
+
                 placeholder="Master Password"
+
                 autoComplete="new-password"
               />
 
               <input
                 ref={confirmMasterPasswordRef}
+
                 type="password"
+
                 placeholder="Confirm Master Password"
+
                 autoComplete="new-password"
               />
 
