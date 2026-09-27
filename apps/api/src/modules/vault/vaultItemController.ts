@@ -112,6 +112,17 @@ function handleVaultItemError(error: unknown, res: Response): boolean {
 
       return true;
 
+    case 'ITEM_RESERVATION_EXPIRED':
+      res.status(410).json({
+        error: {
+          code: 'ITEM_RESERVATION_EXPIRED',
+
+          message: 'The item reservation has expired. Reserve the item again.',
+        },
+      });
+
+      return true;
+
     default:
       return false;
   }

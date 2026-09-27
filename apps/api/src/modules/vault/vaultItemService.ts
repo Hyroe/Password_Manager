@@ -2,6 +2,11 @@ import { prisma } from '../../lib/prisma.js';
 import { encodeBase64Url } from '../../lib/base64Url.js';
 import { encodeVaultItemCursor, type VaultItemCursor } from './vaultItemPagination.js';
 import { encodeVaultItemSyncCursor, type VaultItemSyncCursor } from './vaultItemSyncCursor.js';
+import {
+  VAULT_ITEM_RESERVATION_TTL_MS,
+  getVaultItemReservationExpiresAt,
+  isVaultItemReservationExpired,
+} from './vaultItemReservationPolicy.js';
 
 import {
   ITEM_CIPHERTEXT_VERSION,
@@ -14,6 +19,7 @@ import {
   itemKeyAad,
   itemPayloadAad,
 } from './vaultItemCryptoPolicy.js';
+import { Prisma } from '../../generated/prisma/client.js';
 
 interface CreateEncryptedVaultItemInput {
   itemId: string;
@@ -34,62 +40,76 @@ interface CreateEncryptedVaultItemInput {
 }
 
 export async function reserveVaultItem(userId: string, vaultId: string) {
-  const vault = await prisma.vault.findFirst({
-    where: {
-      id: vaultId,
-      userId,
-    },
-  });
+  return prisma.$transaction(async (tx) => {
+    const vault = await tx.vault.findFirst({
+      where: {
+        id: vaultId,
+        userId,
+      },
+    });
 
-  if (!vault) {
-    throw new Error('VAULT_NOT_FOUND');
-  }
+    if (!vault) {
+      throw new Error('VAULT_NOT_FOUND');
+    }
 
-  const vaultKeyEnvelope = await prisma.vaultKeyEnvelope.findFirst({
-    where: {
+    /*
+     * Opportunistic cleanup.
+     *
+     * No cron infrastructure is needed
+     * yet. Creating a new reservation
+     * cleans old abandoned reservations
+     * from this vault.
+     */
+    await cleanupExpiredVaultItemReservations(tx, vaultId);
+
+    const vaultKeyEnvelope = await tx.vaultKeyEnvelope.findFirst({
+      where: {
+        vaultId,
+      },
+
+      orderBy: {
+        vaultKeyVersion: 'desc',
+      },
+    });
+
+    if (!vaultKeyEnvelope) {
+      throw new Error('CRYPTO_STATE_INVALID');
+    }
+
+    const item = await tx.vaultItem.create({
+      data: {
+        vaultId,
+        currentRevisionNumber: 0,
+      },
+    });
+
+    const revisionNumber = 1;
+
+    return {
       vaultId,
-    },
+      itemId: item.id,
 
-    orderBy: {
-      vaultKeyVersion: 'desc',
-    },
+      revisionNumber,
+
+      payloadVersion: ITEM_PAYLOAD_VERSION,
+
+      ciphertextVersion: ITEM_CIPHERTEXT_VERSION,
+
+      itemKeyVersion: ITEM_KEY_VERSION,
+
+      vaultKeyVersion: vaultKeyEnvelope.vaultKeyVersion,
+
+      envelopeVersion: ITEM_KEY_ENVELOPE_VERSION,
+
+      expiresAt: getVaultItemReservationExpiresAt(item.createdAt),
+
+      aad: {
+        itemKey: itemKeyAad(vaultId, item.id, revisionNumber, vaultKeyEnvelope.vaultKeyVersion),
+
+        payload: itemPayloadAad(vaultId, item.id, revisionNumber, ITEM_KEY_VERSION),
+      },
+    };
   });
-
-  if (!vaultKeyEnvelope) {
-    throw new Error('CRYPTO_STATE_INVALID');
-  }
-
-  const item = await prisma.vaultItem.create({
-    data: {
-      vaultId,
-      currentRevisionNumber: 0,
-    },
-  });
-
-  const revisionNumber = 1;
-
-  return {
-    vaultId,
-    itemId: item.id,
-
-    revisionNumber,
-
-    payloadVersion: ITEM_PAYLOAD_VERSION,
-
-    ciphertextVersion: ITEM_CIPHERTEXT_VERSION,
-
-    itemKeyVersion: ITEM_KEY_VERSION,
-
-    vaultKeyVersion: vaultKeyEnvelope.vaultKeyVersion,
-
-    envelopeVersion: ITEM_KEY_ENVELOPE_VERSION,
-
-    aad: {
-      itemKey: itemKeyAad(vaultId, item.id, revisionNumber, vaultKeyEnvelope.vaultKeyVersion),
-
-      payload: itemPayloadAad(vaultId, item.id, revisionNumber, ITEM_KEY_VERSION),
-    },
-  };
 }
 
 export async function createEncryptedVaultItem(
@@ -114,7 +134,7 @@ export async function createEncryptedVaultItem(
     throw new Error('INVALID_CRYPTO_MATERIAL');
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const vault = await tx.vault.findFirst({
       where: {
         id: vaultId,
@@ -136,6 +156,27 @@ export async function createEncryptedVaultItem(
 
     if (!item) {
       throw new Error('ITEM_RESERVATION_NOT_FOUND');
+    }
+
+    if (isVaultItemReservationExpired(item.createdAt)) {
+      await tx.vaultItem.deleteMany({
+        where: {
+          id: item.id,
+          vaultId,
+
+          currentRevisionNumber: 0,
+
+          deletedAt: null,
+
+          revisions: {
+            none: {},
+          },
+        },
+      });
+
+      return {
+        expired: true as const,
+      };
     }
 
     if (item.currentRevisionNumber !== 0 || input.revisionNumber !== 1) {
@@ -219,15 +260,24 @@ export async function createEncryptedVaultItem(
     });
 
     return {
-      id: item.id,
+      expired: false as const,
 
-      vaultId,
+      item: {
+        id: item.id,
+        vaultId,
 
-      revisionNumber: input.revisionNumber,
+        revisionNumber: input.revisionNumber,
 
-      createdAt: revision.createdAt,
+        createdAt: revision.createdAt,
+      },
     };
   });
+
+  if (result.expired) {
+    throw new Error('ITEM_RESERVATION_EXPIRED');
+  }
+
+  return result.item;
 }
 
 async function getCurrentVaultKeyVersion(vaultId: string): Promise<number> {
@@ -604,7 +654,7 @@ export async function createEncryptedVaultItemRevision(
     });
 
     return {
-      id: itemId,
+      id: item.id,
       vaultId,
 
       revisionNumber: input.revisionNumber,
@@ -1108,4 +1158,37 @@ export async function syncVaultItems(
       }),
     },
   };
+}
+
+async function cleanupExpiredVaultItemReservations(
+  tx: Prisma.TransactionClient,
+  vaultId: string,
+  now = new Date(),
+) {
+  const cutoff = new Date(now.getTime() - VAULT_ITEM_RESERVATION_TTL_MS);
+
+  const result = await tx.vaultItem.deleteMany({
+    where: {
+      vaultId,
+
+      currentRevisionNumber: 0,
+
+      deletedAt: null,
+
+      createdAt: {
+        lte: cutoff,
+      },
+
+      /*
+       * Defensive check:
+       * a reservation must not have
+       * persisted revisions.
+       */
+      revisions: {
+        none: {},
+      },
+    },
+  });
+
+  return result.count;
 }

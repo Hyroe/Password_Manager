@@ -1401,4 +1401,168 @@ describe('encrypted vault item routes', () => {
 
     expect(response.body.error.code).toBe('INVALID_SYNC_CURSOR');
   });
+
+  it('returns an expiration time for an item reservation', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const before = Date.now();
+
+    const response = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    const after = Date.now();
+
+    expect(response.status).toBe(201);
+
+    const expiresAt = new Date(response.body.expiresAt).getTime();
+
+    expect(expiresAt).toBeGreaterThanOrEqual(before + 60 * 60 * 1000);
+
+    expect(expiresAt).toBeLessThanOrEqual(after + 60 * 60 * 1000);
+  });
+
+  it('rejects an expired item reservation', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const reservation = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    expect(reservation.status).toBe(201);
+
+    /*
+     * Simulate an abandoned reservation.
+     */
+    await prisma.vaultItem.update({
+      where: {
+        id: reservation.body.itemId,
+      },
+
+      data: {
+        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      },
+    });
+
+    const response = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        itemId: reservation.body.itemId,
+
+        revisionNumber: 1,
+
+        payloadVersion: 1,
+        ciphertextVersion: 1,
+
+        itemKeyVersion: 1,
+        vaultKeyVersion: 1,
+
+        envelopeVersion: 1,
+
+        itemKeyEnvelope: encodeBase64Url(encryptedFixture(61, 0x51)),
+
+        ciphertext: encodeBase64Url(encryptedFixture(100, 0x61)),
+      });
+
+    expect(response.status).toBe(410);
+
+    expect(response.body.error.code).toBe('ITEM_RESERVATION_EXPIRED');
+
+    expect(
+      await prisma.vaultItem.findUnique({
+        where: {
+          id: reservation.body.itemId,
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it('cleans expired abandoned reservations when reserving a new item', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const abandoned = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    expect(abandoned.status).toBe(201);
+
+    await prisma.vaultItem.update({
+      where: {
+        id: abandoned.body.itemId,
+      },
+
+      data: {
+        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      },
+    });
+
+    const next = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    expect(next.status).toBe(201);
+
+    expect(
+      await prisma.vaultItem.findUnique({
+        where: {
+          id: abandoned.body.itemId,
+        },
+      }),
+    ).toBeNull();
+
+    expect(
+      await prisma.vaultItem.findUnique({
+        where: {
+          id: next.body.itemId,
+        },
+      }),
+    ).not.toBeNull();
+  });
+
+  it('never cleans completed vault items', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    const { itemId } = await createCompletedItem(vault.id, token);
+
+    /*
+     * Artificially make the item very old.
+     */
+    await prisma.vaultItem.update({
+      where: {
+        id: itemId,
+      },
+
+      data: {
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      },
+    });
+
+    await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    const item = await prisma.vaultItem.findUnique({
+      where: {
+        id: itemId,
+      },
+    });
+
+    expect(item).not.toBeNull();
+
+    expect(item?.currentRevisionNumber).toBe(1);
+
+    expect(
+      await prisma.vaultItemRevision.count({
+        where: {
+          itemId,
+        },
+      }),
+    ).toBe(1);
+  });
 });
