@@ -43,6 +43,9 @@ export interface EncryptedVaultItem {
   };
 
   createdAt: string;
+  updatedAt: string;
+
+  deletedAt: string | null;
 }
 
 interface CreateEncryptedVaultItemRequest {
@@ -89,11 +92,23 @@ export async function createEncryptedVaultItem(
 }
 
 export async function listEncryptedVaultItems(vaultId: string): Promise<EncryptedVaultItem[]> {
-  const response = await apiRequest<{
-    items: EncryptedVaultItem[];
-  }>(`/api/v1/vaults/${vaultId}/items`);
+  const items: EncryptedVaultItem[] = [];
 
-  return response.items;
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await listEncryptedVaultItemPage(vaultId, false, cursor);
+
+    items.push(...page.items);
+
+    if (!page.page.hasMore || !page.page.nextCursor) {
+      break;
+    }
+
+    cursor = page.page.nextCursor;
+  }
+
+  return items;
 }
 
 export async function getEncryptedVaultItem(
@@ -228,11 +243,23 @@ export interface RestoredVaultItem {
 }
 
 export async function listAllEncryptedVaultItems(vaultId: string): Promise<EncryptedVaultItem[]> {
-  const response = await apiRequest<{
-    items: EncryptedVaultItem[];
-  }>(`/api/v1/vaults/${vaultId}/items?includeDeleted=true`);
+  const items: EncryptedVaultItem[] = [];
 
-  return response.items;
+  let cursor: string | undefined;
+
+  while (true) {
+    const page = await listEncryptedVaultItemPage(vaultId, true, cursor);
+
+    items.push(...page.items);
+
+    if (!page.page.hasMore || !page.page.nextCursor) {
+      break;
+    }
+
+    cursor = page.page.nextCursor;
+  }
+
+  return items;
 }
 
 export async function restoreEncryptedVaultItem(
@@ -247,4 +274,74 @@ export async function restoreEncryptedVaultItem(
       expectedRevisionNumber,
     }),
   });
+}
+
+export interface VaultItemPage {
+  items: EncryptedVaultItem[];
+
+  page: {
+    hasMore: boolean;
+    nextCursor: string | null;
+    snapshotAt: string;
+  };
+}
+
+export type VaultItemChangeKind = 'CREATED' | 'UPDATED' | 'DELETED' | 'RESTORED' | 'SNAPSHOT';
+
+export interface VaultItemSyncChange {
+  changeId: string;
+
+  kind: VaultItemChangeKind;
+
+  itemId: string;
+  revisionNumber: number;
+
+  deletedAt: string | null;
+  changedAt: string;
+
+  item: EncryptedVaultItem | null;
+}
+
+export interface VaultItemSyncResponse {
+  changes: VaultItemSyncChange[];
+
+  sync: {
+    hasMore: boolean;
+    nextCursor: string;
+  };
+}
+
+async function listEncryptedVaultItemPage(
+  vaultId: string,
+  includeDeleted: boolean,
+  cursor?: string,
+): Promise<VaultItemPage> {
+  const query = new URLSearchParams();
+
+  query.set('includeDeleted', includeDeleted ? 'true' : 'false');
+
+  query.set('limit', '100');
+
+  if (cursor) {
+    query.set('cursor', cursor);
+  }
+
+  return apiRequest<VaultItemPage>(`/api/v1/vaults/${vaultId}/items?${query.toString()}`);
+}
+
+export async function syncEncryptedVaultItems(
+  vaultId: string,
+  cursor?: string,
+): Promise<VaultItemSyncResponse> {
+  const query = new URLSearchParams();
+
+  query.set('limit', '200');
+
+  if (cursor) {
+    query.set('cursor', cursor);
+  }
+
+  return apiRequest<VaultItemSyncResponse>(
+    `/api/v1/vaults/${vaultId}/items/sync?${query.toString()}`,
+  );
 }

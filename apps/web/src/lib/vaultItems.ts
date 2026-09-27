@@ -30,6 +30,9 @@ import {
   deleteEncryptedVaultItem,
   listAllEncryptedVaultItems,
   restoreEncryptedVaultItem,
+  syncEncryptedVaultItems,
+  type VaultItemSyncChange,
+  type VaultItemSyncResponse,
   type RestoredVaultItem,
   type CreatedVaultItem,
   type EncryptedVaultItem,
@@ -332,4 +335,81 @@ export async function restoreVaultItem(
   expectedRevisionNumber: number,
 ): Promise<RestoredVaultItem> {
   return restoreEncryptedVaultItem(vaultId, itemId, expectedRevisionNumber);
+}
+
+export async function syncVaultItemChanges(
+  vaultId: string,
+  cursor?: string,
+): Promise<VaultItemSyncResponse> {
+  return syncEncryptedVaultItems(vaultId, cursor);
+}
+
+export interface VaultItemCollections {
+  activeItems: EncryptedVaultItem[];
+
+  deletedItems: EncryptedVaultItem[];
+}
+
+function sortVaultItems(items: EncryptedVaultItem[]): EncryptedVaultItem[] {
+  return [...items].sort((left, right) => {
+    const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
+
+    if (byUpdatedAt !== 0) {
+      return byUpdatedAt;
+    }
+
+    return right.id.localeCompare(left.id);
+  });
+}
+
+export function applyVaultItemSyncChanges(
+  collections: VaultItemCollections,
+
+  changes: VaultItemSyncChange[],
+): VaultItemCollections {
+  const byId = new Map<string, EncryptedVaultItem>();
+
+  for (const item of [...collections.activeItems, ...collections.deletedItems]) {
+    byId.set(item.id, item);
+  }
+
+  for (const change of changes) {
+    if (change.kind === 'DELETED') {
+      const existing = byId.get(change.itemId);
+
+      if (!existing) {
+        throw new Error('Vault sync state is incomplete.');
+      }
+
+      byId.set(change.itemId, {
+        ...existing,
+
+        revisionNumber: change.revisionNumber,
+
+        deletedAt: change.deletedAt,
+
+        updatedAt: change.changedAt,
+      });
+
+      continue;
+    }
+
+    if (!change.item) {
+      throw new Error('Vault sync change is missing encrypted item data.');
+    }
+
+    if (change.item.id !== change.itemId || change.item.revisionNumber !== change.revisionNumber) {
+      throw new Error('Vault sync change is inconsistent.');
+    }
+
+    byId.set(change.itemId, change.item);
+  }
+
+  const allItems = [...byId.values()];
+
+  return {
+    activeItems: sortVaultItems(allItems.filter((item) => item.deletedAt === null)),
+
+    deletedItems: sortVaultItems(allItems.filter((item) => item.deletedAt !== null)),
+  };
 }

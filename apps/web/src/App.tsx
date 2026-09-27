@@ -38,6 +38,9 @@ import {
   loadAndDecryptLoginItem,
   restoreVaultItem,
   updateLoginVaultItem,
+  applyVaultItemSyncChanges,
+  syncVaultItemChanges,
+  type VaultItemCollections,
 } from './lib/vaultItems';
 
 interface StartRegistrationResponse {
@@ -167,6 +170,8 @@ export default function App() {
   const editNotesRef = useRef<HTMLTextAreaElement>(null);
 
   const [deletedVaultItems, setDeletedVaultItems] = useState<EncryptedVaultItem[]>([]);
+
+  const vaultSyncCursorRef = useRef<string | null>(null);
 
   type RuntimeState =
     'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
@@ -343,12 +348,55 @@ export default function App() {
     setMessage('');
   }
 
+  async function bootstrapVaultSync(vaultId: string): Promise<void> {
+    /*
+     * First get the current server state.
+     * This also guarantees that legacy
+     * deleted items are represented locally.
+     */
+    const allItems = await listVaultItemsIncludingDeleted(vaultId);
+
+    let collections: VaultItemCollections = {
+      activeItems: allItems.filter((item) => item.deletedAt === null),
+
+      deletedItems: allItems.filter((item) => item.deletedAt !== null),
+    };
+
+    let cursor: string | undefined;
+
+    /*
+     * Replay the append-only change feed up
+     * to its current head.
+     *
+     * This catches mutations that happened
+     * while the full snapshot was loading.
+     */
+    while (true) {
+      const result = await syncVaultItemChanges(vaultId, cursor);
+
+      collections = applyVaultItemSyncChanges(collections, result.changes);
+
+      cursor = result.sync.nextCursor;
+
+      if (!result.sync.hasMore) {
+        break;
+      }
+    }
+
+    setVaultItems(collections.activeItems);
+
+    setDeletedVaultItems(collections.deletedItems);
+
+    vaultSyncCursorRef.current = cursor ?? null;
+  }
+
   function clearVaultUiState() {
     setVaultItems([]);
     setSelectedLogin(null);
     setSelectedItemId(null);
     setEditingLogin(false);
     setDeletedVaultItems([]);
+    vaultSyncCursorRef.current = null;
 
     if (loginNameRef.current) {
       loginNameRef.current.value = '';
@@ -712,6 +760,105 @@ export default function App() {
     }
   }
 
+  async function handleSyncVaultItems() {
+    const vaultId = unlockedVaultIdRef.current;
+
+    if (!vaultId) {
+      setError('Vault is locked.');
+
+      return;
+    }
+
+    resetMessages();
+    setLoading(true);
+
+    try {
+      let cursor = vaultSyncCursorRef.current ?? undefined;
+
+      let collections: VaultItemCollections = {
+        activeItems: vaultItems,
+
+        deletedItems: deletedVaultItems,
+      };
+
+      let receivedChanges = 0;
+
+      while (true) {
+        const result = await syncVaultItemChanges(vaultId, cursor);
+
+        const selectedChanged =
+          selectedItemId !== null &&
+          result.changes.some(
+            (change) =>
+              change.itemId === selectedItemId &&
+              (change.kind === 'UPDATED' ||
+                change.kind === 'DELETED' ||
+                change.kind === 'RESTORED'),
+          );
+
+        if (selectedChanged) {
+          setEditingLogin(false);
+
+          setSelectedLogin(null);
+          setSelectedItemId(null);
+        }
+
+        receivedChanges += result.changes.length;
+
+        collections = applyVaultItemSyncChanges(collections, result.changes);
+
+        /*
+         * Only advance after this page was
+         * successfully applied.
+         */
+        cursor = result.sync.nextCursor;
+
+        if (!result.sync.hasMore) {
+          break;
+        }
+      }
+
+      setVaultItems(collections.activeItems);
+
+      setDeletedVaultItems(collections.deletedItems);
+
+      vaultSyncCursorRef.current = cursor ?? null;
+
+      setMessage(
+        receivedChanges === 0
+          ? 'Vault is already synchronized.'
+          : `Applied ${receivedChanges} vault change${receivedChanges === 1 ? '' : 's'}.`,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      /*
+       * If local sync state became
+       * inconsistent, rebuild from server.
+       */
+      try {
+        await bootstrapVaultSync(vaultId);
+
+        setError('Vault sync state was rebuilt from the server.');
+      } catch {
+        setError(error instanceof Error ? error.message : 'Vault synchronization failed.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleUnlockVault() {
     const user = authenticatedUser;
 
@@ -756,7 +903,7 @@ export default function App() {
       setRuntimeState('UNLOCKED');
 
       try {
-        await refreshVaultItems();
+        await bootstrapVaultSync(recoveryKit.account.vaultId);
       } catch {
         setVaultItems([]);
 
@@ -1693,6 +1840,16 @@ export default function App() {
           )}
 
           <hr />
+
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              void handleSyncVaultItems();
+            }}
+          >
+            Sync changes
+          </button>
 
           <button type="button" onClick={handleLockVault}>
             Lock vault
