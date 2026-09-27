@@ -291,6 +291,7 @@ export type VaultItemChangeKind = 'CREATED' | 'UPDATED' | 'DELETED' | 'RESTORED'
 export interface VaultItemSyncChange {
   changeId: string;
 
+  version: string;
   kind: VaultItemChangeKind;
 
   itemId: string;

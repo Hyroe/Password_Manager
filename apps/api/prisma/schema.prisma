@@ -169,7 +169,10 @@ model Vault {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  keyEnvelopes     VaultKeyEnvelope[]
+  keyEnvelopes VaultKeyEnvelope[]
+
+  syncVersion BigInt @default(0) @map("sync_version")
+
   vaultItems       VaultItem[]
   vaultItemChanges VaultItemChange[]
 
@@ -348,15 +351,15 @@ model VaultItemChange {
   itemId String    @map("item_id") @db.Uuid
   item   VaultItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
-  revisionNumber Int @map("revision_number")
+  version BigInt @db.BigInt
 
-  kind VaultItemChangeKind
+  revisionNumber Int                 @map("revision_number")
+  kind           VaultItemChangeKind
 
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  changedAt DateTime  @default(now()) @map("changed_at") @db.Timestamptz(3)
 
-  changedAt DateTime @default(now()) @map("changed_at") @db.Timestamptz(3)
-
-  @@index([vaultId, id])
+  @@unique([vaultId, version])
   @@index([itemId, id])
   @@map("vault_item_changes")
 }

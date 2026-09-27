@@ -5,7 +5,7 @@ const syncCursorSchema = z.object({
 
   vaultId: z.string().uuid(),
 
-  afterChangeId: z.string().regex(/^\d+$/),
+  afterVersion: z.string().regex(/^\d+$/),
 });
 
 export interface VaultItemSyncCursor {
@@ -13,7 +13,7 @@ export interface VaultItemSyncCursor {
 
   vaultId: string;
 
-  afterChangeId: string;
+  afterVersion: string;
 }
 
 export function encodeVaultItemSyncCursor(cursor: VaultItemSyncCursor): string {
@@ -46,7 +46,7 @@ export function decodeVaultItemSyncCursor(value: string): VaultItemSyncCursor {
   }
 
   try {
-    BigInt(result.data.afterChangeId);
+    BigInt(result.data.afterVersion);
   } catch {
     throw new Error('INVALID_SYNC_CURSOR');
   }

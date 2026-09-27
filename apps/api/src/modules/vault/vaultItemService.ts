@@ -19,7 +19,8 @@ import {
   itemKeyAad,
   itemPayloadAad,
 } from './vaultItemCryptoPolicy.js';
-import { Prisma } from '../../generated/prisma/client.js';
+
+import type { Prisma } from '../../generated/prisma/client.js';
 
 interface CreateEncryptedVaultItemInput {
   itemId: string;
@@ -27,9 +28,11 @@ interface CreateEncryptedVaultItemInput {
   revisionNumber: number;
 
   payloadVersion: number;
+
   ciphertextVersion: number;
 
   itemKeyVersion: number;
+
   vaultKeyVersion: number;
 
   envelopeVersion: number;
@@ -44,6 +47,7 @@ export async function reserveVaultItem(userId: string, vaultId: string) {
     const vault = await tx.vault.findFirst({
       where: {
         id: vaultId,
+
         userId,
       },
     });
@@ -53,13 +57,21 @@ export async function reserveVaultItem(userId: string, vaultId: string) {
     }
 
     /*
+
      * Opportunistic cleanup.
+
      *
+
      * No cron infrastructure is needed
+
      * yet. Creating a new reservation
+
      * cleans old abandoned reservations
+
      * from this vault.
+
      */
+
     await cleanupExpiredVaultItemReservations(tx, vaultId);
 
     const vaultKeyEnvelope = await tx.vaultKeyEnvelope.findFirst({
@@ -79,6 +91,7 @@ export async function reserveVaultItem(userId: string, vaultId: string) {
     const item = await tx.vaultItem.create({
       data: {
         vaultId,
+
         currentRevisionNumber: 0,
       },
     });
@@ -87,6 +100,7 @@ export async function reserveVaultItem(userId: string, vaultId: string) {
 
     return {
       vaultId,
+
       itemId: item.id,
 
       revisionNumber,
@@ -114,7 +128,9 @@ export async function reserveVaultItem(userId: string, vaultId: string) {
 
 export async function createEncryptedVaultItem(
   userId: string,
+
   vaultId: string,
+
   input: CreateEncryptedVaultItemInput,
 ) {
   if (input.itemKeyEnvelope.length !== ITEM_KEY_ENVELOPE_BYTES) {
@@ -127,6 +143,7 @@ export async function createEncryptedVaultItem(
   ) {
     throw new Error('INVALID_CRYPTO_MATERIAL');
   }
+
   if (
     input.itemKeyEnvelope[0] !== input.envelopeVersion ||
     input.ciphertext[0] !== input.ciphertextVersion
@@ -138,6 +155,7 @@ export async function createEncryptedVaultItem(
     const vault = await tx.vault.findFirst({
       where: {
         id: vaultId,
+
         userId,
       },
     });
@@ -149,7 +167,9 @@ export async function createEncryptedVaultItem(
     const item = await tx.vaultItem.findFirst({
       where: {
         id: input.itemId,
+
         vaultId,
+
         deletedAt: null,
       },
     });
@@ -162,6 +182,7 @@ export async function createEncryptedVaultItem(
       await tx.vaultItem.deleteMany({
         where: {
           id: item.id,
+
           vaultId,
 
           currentRevisionNumber: 0,
@@ -201,11 +222,16 @@ export async function createEncryptedVaultItem(
       throw new Error('VAULT_KEY_VERSION_CHANGED');
     }
 
+    const syncVersion = await allocateVaultSyncVersion(tx, vaultId);
+
     const claimed = await tx.vaultItem.updateMany({
       where: {
         id: item.id,
+
         vaultId,
+
         currentRevisionNumber: 0,
+
         deletedAt: null,
       },
 
@@ -249,7 +275,10 @@ export async function createEncryptedVaultItem(
     await tx.vaultItemChange.create({
       data: {
         vaultId,
+
         itemId: item.id,
+
+        version: syncVersion,
 
         revisionNumber: input.revisionNumber,
 
@@ -264,6 +293,7 @@ export async function createEncryptedVaultItem(
 
       item: {
         id: item.id,
+
         vaultId,
 
         revisionNumber: input.revisionNumber,
@@ -304,15 +334,20 @@ async function getCurrentVaultKeyVersion(vaultId: string): Promise<number> {
 
 async function buildEncryptedItemResponse(
   vaultId: string,
+
   itemId: string,
+
   revisionNumber: number,
+
   vaultKeyVersion: number,
+
   updatedAt: Date,
 ) {
   const revision = await prisma.vaultItemRevision.findUnique({
     where: {
       itemId_revisionNumber: {
         itemId,
+
         revisionNumber,
       },
     },
@@ -326,6 +361,7 @@ async function buildEncryptedItemResponse(
     where: {
       revisionId_vaultKeyVersion: {
         revisionId: revision.id,
+
         vaultKeyVersion,
       },
     },
@@ -337,6 +373,7 @@ async function buildEncryptedItemResponse(
 
   return {
     id: itemId,
+
     vaultId,
 
     revisionNumber,
@@ -369,16 +406,22 @@ async function buildEncryptedItemResponse(
 
 export async function listEncryptedVaultItems(
   userId: string,
+
   vaultId: string,
+
   includeDeleted = false,
 ) {
   const result = await listEncryptedVaultItemsPage(userId, vaultId, {
     includeDeleted,
 
     /*
+
      * Legacy/internal convenience.
+
      * External API is paginated.
+
      */
+
     limit: 100,
   });
 
@@ -389,6 +432,7 @@ export async function getEncryptedVaultItem(userId: string, vaultId: string, ite
   const item = await prisma.vaultItem.findFirst({
     where: {
       id: itemId,
+
       vaultId,
 
       deletedAt: null,
@@ -404,7 +448,9 @@ export async function getEncryptedVaultItem(userId: string, vaultId: string, ite
 
     select: {
       id: true,
+
       currentRevisionNumber: true,
+
       updatedAt: true,
     },
   });
@@ -417,23 +463,32 @@ export async function getEncryptedVaultItem(userId: string, vaultId: string, ite
 
   return buildEncryptedItemResponse(
     vaultId,
+
     item.id,
+
     item.currentRevisionNumber,
+
     vaultKeyVersion,
+
     item.updatedAt,
   );
 }
 
 export async function getVaultItemUpdateOptions(
   userId: string,
+
   vaultId: string,
+
   itemId: string,
+
   expectedRevisionNumber: number,
 ) {
   const item = await prisma.vaultItem.findFirst({
     where: {
       id: itemId,
+
       vaultId,
+
       deletedAt: null,
 
       vault: {
@@ -443,6 +498,7 @@ export async function getVaultItemUpdateOptions(
 
     select: {
       id: true,
+
       currentRevisionNumber: true,
     },
   });
@@ -473,9 +529,11 @@ export async function getVaultItemUpdateOptions(
 
   return {
     vaultId,
+
     itemId,
 
     expectedRevisionNumber,
+
     revisionNumber,
 
     payloadVersion: ITEM_PAYLOAD_VERSION,
@@ -502,9 +560,11 @@ interface CreateEncryptedVaultItemRevisionInput {
   revisionNumber: number;
 
   payloadVersion: number;
+
   ciphertextVersion: number;
 
   itemKeyVersion: number;
+
   vaultKeyVersion: number;
 
   envelopeVersion: number;
@@ -516,8 +576,11 @@ interface CreateEncryptedVaultItemRevisionInput {
 
 export async function createEncryptedVaultItemRevision(
   userId: string,
+
   vaultId: string,
+
   itemId: string,
+
   input: CreateEncryptedVaultItemRevisionInput,
 ) {
   if (input.itemKeyEnvelope.length !== ITEM_KEY_ENVELOPE_BYTES) {
@@ -546,7 +609,9 @@ export async function createEncryptedVaultItemRevision(
     const item = await tx.vaultItem.findFirst({
       where: {
         id: itemId,
+
         vaultId,
+
         deletedAt: null,
 
         vault: {
@@ -556,6 +621,7 @@ export async function createEncryptedVaultItemRevision(
 
       select: {
         id: true,
+
         currentRevisionNumber: true,
       },
     });
@@ -587,15 +653,25 @@ export async function createEncryptedVaultItemRevision(
     }
 
     /*
+
      * Atomic compare-and-set.
+
      *
+
      * Only a client whose expected
+
      * revision is still current can
+
      * advance the item.
+
      */
+
+    const syncVersion = await allocateVaultSyncVersion(tx, vaultId);
+
     const claimed = await tx.vaultItem.updateMany({
       where: {
         id: itemId,
+
         vaultId,
 
         currentRevisionNumber: input.expectedRevisionNumber,
@@ -643,7 +719,10 @@ export async function createEncryptedVaultItemRevision(
     await tx.vaultItemChange.create({
       data: {
         vaultId,
+
         itemId,
+
+        version: syncVersion,
 
         revisionNumber: input.revisionNumber,
 
@@ -655,6 +734,7 @@ export async function createEncryptedVaultItemRevision(
 
     return {
       id: item.id,
+
       vaultId,
 
       revisionNumber: input.revisionNumber,
@@ -666,14 +746,18 @@ export async function createEncryptedVaultItemRevision(
 
 export async function softDeleteVaultItem(
   userId: string,
+
   vaultId: string,
+
   itemId: string,
+
   expectedRevisionNumber: number,
 ) {
   return prisma.$transaction(async (tx) => {
     const item = await tx.vaultItem.findFirst({
       where: {
         id: itemId,
+
         vaultId,
 
         vault: {
@@ -683,7 +767,9 @@ export async function softDeleteVaultItem(
 
       select: {
         id: true,
+
         currentRevisionNumber: true,
+
         deletedAt: true,
       },
     });
@@ -693,26 +779,41 @@ export async function softDeleteVaultItem(
     }
 
     /*
+
      * Revision comparison happens before
+
      * idempotent delete handling.
+
      *
+
      * A stale client must not be able to
+
      * delete a newer revision.
+
      */
+
     if (item.currentRevisionNumber !== expectedRevisionNumber) {
       throw new Error('ITEM_REVISION_CONFLICT');
     }
 
     /*
+
      * DELETE is idempotent for the same
+
      * current revision.
+
      *
+
      * Useful when the original response
+
      * was lost and the client retries.
+
      */
+
     if (item.deletedAt) {
       return {
         id: item.id,
+
         vaultId,
 
         revisionNumber: item.currentRevisionNumber,
@@ -721,17 +822,26 @@ export async function softDeleteVaultItem(
       };
     }
 
+    const syncVersion = await allocateVaultSyncVersion(tx, vaultId);
+
     const deletedAt = new Date();
 
     /*
+
      * Atomic compare-and-set:
+
      *
+
      * - item must still be active
+
      * - revision must still match
+
      */
+
     const deleted = await tx.vaultItem.updateMany({
       where: {
         id: itemId,
+
         vaultId,
 
         currentRevisionNumber: expectedRevisionNumber,
@@ -751,19 +861,24 @@ export async function softDeleteVaultItem(
     await tx.vaultItemChange.create({
       data: {
         vaultId,
+
         itemId,
+
+        version: syncVersion,
 
         revisionNumber: expectedRevisionNumber,
 
         kind: 'DELETED',
 
         deletedAt,
+
         changedAt: deletedAt,
       },
     });
 
     return {
       id: item.id,
+
       vaultId,
 
       revisionNumber: expectedRevisionNumber,
@@ -775,14 +890,18 @@ export async function softDeleteVaultItem(
 
 export async function restoreVaultItem(
   userId: string,
+
   vaultId: string,
+
   itemId: string,
+
   expectedRevisionNumber: number,
 ) {
   return prisma.$transaction(async (tx) => {
     const item = await tx.vaultItem.findFirst({
       where: {
         id: itemId,
+
         vaultId,
 
         vault: {
@@ -792,7 +911,9 @@ export async function restoreVaultItem(
 
       select: {
         id: true,
+
         currentRevisionNumber: true,
+
         deletedAt: true,
       },
     });
@@ -808,6 +929,7 @@ export async function restoreVaultItem(
     if (!item.deletedAt) {
       return {
         id: item.id,
+
         vaultId,
 
         revisionNumber: item.currentRevisionNumber,
@@ -816,11 +938,14 @@ export async function restoreVaultItem(
       };
     }
 
+    const syncVersion = await allocateVaultSyncVersion(tx, vaultId);
+
     const restoredAt = new Date();
 
     const restored = await tx.vaultItem.updateMany({
       where: {
         id: itemId,
+
         vaultId,
 
         currentRevisionNumber: expectedRevisionNumber,
@@ -842,19 +967,24 @@ export async function restoreVaultItem(
     await tx.vaultItemChange.create({
       data: {
         vaultId,
+
         itemId,
+
+        version: syncVersion,
 
         revisionNumber: expectedRevisionNumber,
 
         kind: 'RESTORED',
 
         deletedAt: null,
+
         changedAt: restoredAt,
       },
     });
 
     return {
       id: item.id,
+
       vaultId,
 
       revisionNumber: expectedRevisionNumber,
@@ -866,6 +996,7 @@ export async function restoreVaultItem(
 
 interface ListEncryptedVaultItemsOptions {
   includeDeleted: boolean;
+
   limit: number;
 
   cursor?: VaultItemCursor;
@@ -873,12 +1004,15 @@ interface ListEncryptedVaultItemsOptions {
 
 export async function listEncryptedVaultItemsPage(
   userId: string,
+
   vaultId: string,
+
   options: ListEncryptedVaultItemsOptions,
 ) {
   const vault = await prisma.vault.findFirst({
     where: {
       id: vaultId,
+
       userId,
     },
 
@@ -896,9 +1030,13 @@ export async function listEncryptedVaultItemsPage(
   const snapshotAt = options.cursor ? new Date(options.cursor.snapshotAt) : new Date();
 
   /*
+
    * Fetch one extra row so we can tell
+
    * whether another page exists.
+
    */
+
   const items = await prisma.vaultItem.findMany({
     where: {
       vaultId,
@@ -914,9 +1052,13 @@ export async function listEncryptedVaultItemsPage(
       },
 
       /*
+
        * Freeze the result set to the time
+
        * the first page was requested.
+
        */
+
       updatedAt: {
         lte: snapshotAt,
       },
@@ -973,9 +1115,13 @@ export async function listEncryptedVaultItemsPage(
     pageItems.map(async (item) => {
       const encryptedItem = await buildEncryptedItemResponse(
         vaultId,
+
         item.id,
+
         item.currentRevisionNumber,
+
         vaultKeyVersion,
+
         item.updatedAt,
       );
 
@@ -1011,6 +1157,7 @@ export async function listEncryptedVaultItemsPage(
 
     page: {
       hasMore,
+
       nextCursor,
 
       snapshotAt: snapshotAt.toISOString(),
@@ -1026,12 +1173,15 @@ interface SyncVaultItemsOptions {
 
 export async function syncVaultItems(
   userId: string,
+
   vaultId: string,
+
   options: SyncVaultItemsOptions,
 ) {
   const vault = await prisma.vault.findFirst({
     where: {
       id: vaultId,
+
       userId,
     },
 
@@ -1044,23 +1194,27 @@ export async function syncVaultItems(
     throw new Error('VAULT_NOT_FOUND');
   }
 
-  const afterChangeId = options.cursor ? BigInt(options.cursor.afterChangeId) : 0n;
+  const afterVersion = options.cursor ? BigInt(options.cursor.afterVersion) : 0n;
 
   /*
+
    * Fetch one extra change so we know
+
    * whether another page exists.
+
    */
+
   const changes = await prisma.vaultItemChange.findMany({
     where: {
       vaultId,
 
-      id: {
-        gt: afterChangeId,
+      version: {
+        gt: afterVersion,
       },
     },
 
     orderBy: {
-      id: 'asc',
+      version: 'asc',
     },
 
     take: options.limit + 1,
@@ -1077,12 +1231,18 @@ export async function syncVaultItems(
   const resultChanges = await Promise.all(
     pageChanges.map(async (change) => {
       /*
+
        * A delete is a tombstone.
+
        * No ciphertext needs to be sent.
+
        */
+
       if (change.kind === 'DELETED') {
         return {
           changeId: change.id.toString(),
+
+          version: change.version.toString(),
 
           kind: change.kind,
 
@@ -1104,14 +1264,20 @@ export async function syncVaultItems(
 
       const encryptedItem = await buildEncryptedItemResponse(
         vaultId,
+
         change.itemId,
+
         change.revisionNumber,
+
         vaultKeyVersion,
+
         change.changedAt,
       );
 
       return {
         changeId: change.id.toString(),
+
+        version: change.version.toString(),
 
         kind: change.kind,
 
@@ -1135,13 +1301,20 @@ export async function syncVaultItems(
   const lastChange = pageChanges[pageChanges.length - 1];
 
   /*
+
    * A sync cursor is always returned,
+
    * including when there were no changes.
+
    *
+
    * That lets the client persist a durable
+
    * checkpoint and poll again later.
+
    */
-  const nextAfterChangeId = lastChange ? lastChange.id : afterChangeId;
+
+  const nextAfterVersion = lastChange ? lastChange.version : afterVersion;
 
   return {
     changes: resultChanges,
@@ -1154,7 +1327,7 @@ export async function syncVaultItems(
 
         vaultId,
 
-        afterChangeId: nextAfterChangeId.toString(),
+        afterVersion: nextAfterVersion.toString(),
       }),
     },
   };
@@ -1162,7 +1335,9 @@ export async function syncVaultItems(
 
 async function cleanupExpiredVaultItemReservations(
   tx: Prisma.TransactionClient,
+
   vaultId: string,
+
   now = new Date(),
 ) {
   const cutoff = new Date(now.getTime() - VAULT_ITEM_RESERVATION_TTL_MS);
@@ -1180,10 +1355,15 @@ async function cleanupExpiredVaultItemReservations(
       },
 
       /*
+
        * Defensive check:
+
        * a reservation must not have
+
        * persisted revisions.
+
        */
+
       revisions: {
         none: {},
       },
@@ -1191,4 +1371,28 @@ async function cleanupExpiredVaultItemReservations(
   });
 
   return result.count;
+}
+
+async function allocateVaultSyncVersion(
+  tx: Prisma.TransactionClient,
+
+  vaultId: string,
+): Promise<bigint> {
+  const vault = await tx.vault.update({
+    where: {
+      id: vaultId,
+    },
+
+    data: {
+      syncVersion: {
+        increment: 1n,
+      },
+    },
+
+    select: {
+      syncVersion: true,
+    },
+  });
+
+  return vault.syncVersion;
 }

@@ -1565,4 +1565,178 @@ describe('encrypted vault item routes', () => {
       }),
     ).toBe(1);
   });
+
+  it('advances the per-vault sync version for each committed change', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    await createCompletedItem(vault.id, token);
+
+    const afterFirst = await prisma.vault.findUniqueOrThrow({
+      where: {
+        id: vault.id,
+      },
+
+      select: {
+        syncVersion: true,
+      },
+    });
+
+    expect(afterFirst.syncVersion).toBe(1n);
+
+    await createCompletedItem(vault.id, token);
+
+    const afterSecond = await prisma.vault.findUniqueOrThrow({
+      where: {
+        id: vault.id,
+      },
+
+      select: {
+        syncVersion: true,
+      },
+    });
+
+    expect(afterSecond.syncVersion).toBe(2n);
+
+    const changes = await prisma.vaultItemChange.findMany({
+      where: {
+        vaultId: vault.id,
+      },
+
+      orderBy: {
+        version: 'asc',
+      },
+
+      select: {
+        version: true,
+      },
+    });
+
+    expect(changes.map((change) => change.version)).toEqual([1n, 2n]);
+  });
+
+  it('serializes concurrent vault changes with per-vault sync versions', async () => {
+    const { vault, token } = await createAuthenticatedVault();
+
+    /*
+     * Reserve two different items first.
+     *
+     * Reservations do not create sync changes.
+     */
+    const firstReservation = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    const secondReservation = await request(app)
+      .post(`/api/v1/vaults/${vault.id}/items/options`)
+      .set('Cookie', `pm_session=${token}`)
+      .send({});
+
+    expect(firstReservation.status).toBe(201);
+
+    expect(secondReservation.status).toBe(201);
+
+    expect(firstReservation.body.itemId).not.toBe(secondReservation.body.itemId);
+
+    /*
+     * Complete both reservations concurrently.
+     *
+     * Both transactions will try to increment
+     * the same vault.syncVersion row.
+     */
+    const [firstResponse, secondResponse] = await Promise.all([
+      request(app)
+        .post(`/api/v1/vaults/${vault.id}/items`)
+        .set('Cookie', `pm_session=${token}`)
+        .send({
+          itemId: firstReservation.body.itemId,
+
+          revisionNumber: 1,
+
+          payloadVersion: 1,
+          ciphertextVersion: 1,
+
+          itemKeyVersion: 1,
+          vaultKeyVersion: 1,
+
+          envelopeVersion: 1,
+
+          itemKeyEnvelope: encodeBase64Url(encryptedFixture(61, 0xa5)),
+
+          ciphertext: encodeBase64Url(encryptedFixture(100, 0xb5)),
+        }),
+
+      request(app)
+        .post(`/api/v1/vaults/${vault.id}/items`)
+        .set('Cookie', `pm_session=${token}`)
+        .send({
+          itemId: secondReservation.body.itemId,
+
+          revisionNumber: 1,
+
+          payloadVersion: 1,
+          ciphertextVersion: 1,
+
+          itemKeyVersion: 1,
+          vaultKeyVersion: 1,
+
+          envelopeVersion: 1,
+
+          itemKeyEnvelope: encodeBase64Url(encryptedFixture(61, 0xc5)),
+
+          ciphertext: encodeBase64Url(encryptedFixture(100, 0xd5)),
+        }),
+    ]);
+
+    expect(firstResponse.status).toBe(201);
+
+    expect(secondResponse.status).toBe(201);
+
+    /*
+     * The order in which the HTTP requests
+     * finish does not matter.
+     *
+     * What matters is that the vault changes
+     * receive one contiguous serialized
+     * version sequence.
+     */
+    const changes = await prisma.vaultItemChange.findMany({
+      where: {
+        vaultId: vault.id,
+      },
+
+      orderBy: {
+        version: 'asc',
+      },
+
+      select: {
+        itemId: true,
+        version: true,
+      },
+    });
+
+    expect(changes).toHaveLength(2);
+
+    expect(changes.map((change) => change.version)).toEqual([1n, 2n]);
+
+    expect(new Set(changes.map((change) => change.itemId))).toEqual(
+      new Set([firstReservation.body.itemId, secondReservation.body.itemId]),
+    );
+
+    /*
+     * The vault checkpoint must match the
+     * latest committed change version.
+     */
+    const vaultState = await prisma.vault.findUniqueOrThrow({
+      where: {
+        id: vault.id,
+      },
+
+      select: {
+        syncVersion: true,
+      },
+    });
+
+    expect(vaultState.syncVersion).toBe(2n);
+  });
 });
