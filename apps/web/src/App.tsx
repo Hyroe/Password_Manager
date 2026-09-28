@@ -2516,6 +2516,16 @@ export default function App() {
 
           {isVaultRoute && (
             <>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.security);
+                }}
+              >
+                Security settings
+              </button>
+
               <hr />
 
               <h3>New login</h3>
@@ -2800,17 +2810,110 @@ export default function App() {
             </>
           )}
 
-          <hr />
+          {isSecurityRoute && (
+            <>
+              <hr />
 
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => {
-              void handleSyncVaultItems();
-            }}
-          >
-            Sync changes
-          </button>
+              <h3>Security</h3>
+
+              <p>
+                Your vault is currently unlocked. Vault keys remain available only in this browser
+                session.
+              </p>
+
+              <h4>Sessions</h4>
+
+              <p>Review active authenticated sessions for your account.</p>
+
+              <button type="button" disabled={loading} onClick={handleLoadSessions}>
+                Load sessions
+              </button>
+
+              {managedSessions.length > 1 && (
+                <button type="button" disabled={loading} onClick={handleRevokeOtherSessions}>
+                  Sign out other sessions
+                </button>
+              )}
+
+              {managedSessions.length > 0 && (
+                <ul>
+                  {managedSessions.map((session) => (
+                    <li key={session.id}>
+                      <strong>{session.deviceLabel}</strong>
+                      {session.current && ' — Current session'}
+                      <br />
+                      Last active: {new Date(session.lastSeenAt).toLocaleString()}
+                      <br />
+                      Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
+                      <br />
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          void handleRevokeManagedSession(session.id, session.current);
+                        }}
+                      >
+                        {session.current ? 'Sign out this session' : 'Sign out'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <hr />
+
+              <h4>Master Password</h4>
+
+              <p>
+                Lock the vault before changing your Master Password. This removes unlocked vault
+                keys from memory before entering the key-management flow.
+              </p>
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  handleLockVault();
+
+                  navigate(routes.security, {
+                    replace: true,
+                  });
+                }}
+              >
+                Lock vault to change Master Password
+              </button>
+
+              <hr />
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.vault);
+                }}
+              >
+                Back to vault
+              </button>
+            </>
+          )}
+
+          {(isVaultRoute || isVaultItemRoute) && (
+            <>
+              <hr />
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  void handleSyncVaultItems();
+                }}
+              >
+                Sync changes
+              </button>
+            </>
+          )}
+
+          <hr />
 
           <button type="button" onClick={handleLockVault}>
             Lock vault
