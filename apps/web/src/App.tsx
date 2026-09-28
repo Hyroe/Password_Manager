@@ -409,8 +409,15 @@ export default function App() {
             selectedItemIdRef.current = null;
 
             setEditingLogin(false);
+            setSelectedLoginPasswordVisible(false);
+            setEditLoginPasswordVisible(false);
+
             setSelectedLogin(null);
             setSelectedItemId(null);
+
+            navigate(routes.vault, {
+              replace: true,
+            });
           }
 
           collections = applyVaultItemSyncChanges(collections, result.changes);
@@ -447,7 +454,7 @@ export default function App() {
         vaultSyncInFlightRef.current = false;
       }
     },
-    [runtimeState, rebuildVaultSearchIndex],
+    [runtimeState, rebuildVaultSearchIndex, navigate],
   );
 
   const clearVaultUiState = useCallback(() => {
@@ -648,9 +655,15 @@ export default function App() {
 
           */
 
-        if (selectedItemId === itemId) {
+        const deletingSelectedItem = selectedItemId === itemId;
+
+        if (deletingSelectedItem) {
           selectedItemIdRef.current = null;
+
           setEditingLogin(false);
+          setSelectedLoginPasswordVisible(false);
+          setEditLoginPasswordVisible(false);
+
           setSelectedLogin(null);
           setSelectedItemId(null);
         }
@@ -664,6 +677,12 @@ export default function App() {
           setDeletedVaultItems([]);
         }
 
+        if (deletingSelectedItem) {
+          navigate(routes.vault, {
+            replace: true,
+          });
+        }
+
         setError(
           'This item changed in another client. Review the latest revision before deleting it.',
         );
@@ -672,14 +691,26 @@ export default function App() {
       }
 
       if (error instanceof ApiError && error.code === 'ITEM_NOT_FOUND') {
-        if (selectedItemId === itemId) {
+        const deletingSelectedItem = selectedItemId === itemId;
+
+        if (deletingSelectedItem) {
           selectedItemIdRef.current = null;
+
           setEditingLogin(false);
+          setSelectedLoginPasswordVisible(false);
+          setEditLoginPasswordVisible(false);
+
           setSelectedLogin(null);
           setSelectedItemId(null);
         }
 
         await refreshVaultItems();
+
+        if (deletingSelectedItem) {
+          navigate(routes.vault, {
+            replace: true,
+          });
+        }
 
         setError('This item no longer exists in the active vault.');
 
@@ -1747,6 +1778,10 @@ export default function App() {
         }
 
         if (error instanceof ApiError && error.code === 'ITEM_NOT_FOUND') {
+          navigate(routes.vault, {
+            replace: true,
+          });
+
           setError('This vault item no longer exists.');
 
           return;
@@ -1761,7 +1796,7 @@ export default function App() {
         setLoading(false);
       }
     },
-    [clearVaultUiState, disposeUnlockedVault],
+    [clearVaultUiState, disposeUnlockedVault, navigate],
   );
 
   useEffect(() => {
@@ -1955,16 +1990,12 @@ export default function App() {
       }
 
       if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
-        /*
-
-          * Do not let the stale editor remain
-
-          * open after a concurrency conflict.
-
-          */
-
         selectedItemIdRef.current = null;
+
         setEditingLogin(false);
+        setSelectedLoginPasswordVisible(false);
+        setEditLoginPasswordVisible(false);
+
         setSelectedLogin(null);
         setSelectedItemId(null);
 
@@ -1973,9 +2004,14 @@ export default function App() {
         } catch {
           vaultItemsRef.current = [];
           deletedVaultItemsRef.current = [];
+
           setVaultItems([]);
           setDeletedVaultItems([]);
         }
+
+        navigate(routes.vault, {
+          replace: true,
+        });
 
         setError(
           'This item changed in another client. Open it again to review the latest revision.',
