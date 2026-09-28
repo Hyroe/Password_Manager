@@ -1,8 +1,16 @@
 import {
   CRYPTO_PROTOCOL_VERSION,
+  KDF_SALT_BYTES,
+  KEY_ENVELOPE_BYTES,
+  KEY_ENVELOPE_VERSION,
+  recoveryRootKeyAad,
   rootKeyAad,
   vaultKeyAad,
 } from '../accounts/cryptoBootstrapPolicy.js';
+
+import type { CompleteMasterPasswordRecoveryInput } from './vaultRecoverySchemas.js';
+
+import { decodeCanonicalBase64Url } from '../accounts/cryptoBootstrapEncoding.js';
 
 import { encodeBase64Url } from '../../lib/base64Url.js';
 
@@ -110,4 +118,294 @@ export async function getVaultUnlockMaterial(userId: string) {
       aad: vaultKeyAad(vault.id, vaultEnvelope.vaultKeyVersion),
     },
   };
+}
+
+export async function getMasterPasswordRecoveryMaterial(userId: string) {
+  /*
+   * Recovery is only available for an
+   * authenticated account with a complete
+   * crypto profile.
+   */
+  const profile = await prisma.userCryptoProfile.findUnique({
+    where: {
+      userId,
+    },
+
+    include: {
+      rootKeyEnvelopes: {
+        orderBy: {
+          keyVersion: 'desc',
+        },
+
+        take: 1,
+      },
+    },
+  });
+
+  if (!profile) {
+    throw new Error('CRYPTO_STATE_INVALID');
+  }
+
+  if (profile.protocolVersion !== CRYPTO_PROTOCOL_VERSION) {
+    throw new Error('CRYPTO_PROTOCOL_UNSUPPORTED');
+  }
+
+  const rootEnvelope = profile.rootKeyEnvelopes[0];
+
+  if (!rootEnvelope) {
+    throw new Error('CRYPTO_STATE_INVALID');
+  }
+
+  /*
+   * Recovery must target the same ARK
+   * version that is currently active.
+   *
+   * We therefore select the newest
+   * RecoveryEnvelope associated with that
+   * root-key version.
+   */
+  const recoveryEnvelope = await prisma.recoveryEnvelope.findFirst({
+    where: {
+      cryptoProfileId: profile.id,
+
+      rootKeyVersion: rootEnvelope.keyVersion,
+    },
+
+    orderBy: {
+      recoveryVersion: 'desc',
+    },
+  });
+
+  if (!recoveryEnvelope) {
+    throw new Error('CRYPTO_STATE_INVALID');
+  }
+
+  return {
+    protocolVersion: profile.protocolVersion,
+
+    cryptoProfileId: profile.id,
+
+    /*
+     * The existing salt is deliberately
+     * NOT returned.
+     *
+     * Recovery creates a fresh KDF salt
+     * locally inside WASM.
+     */
+    kdf: {
+      algorithm: profile.kdfAlgorithm,
+
+      profileVersion: profile.kdfProfileVersion,
+
+      memoryKib: profile.argon2MemoryKib,
+
+      iterations: profile.argon2Iterations,
+
+      parallelism: profile.argon2Parallelism,
+    },
+
+    /*
+     * Encrypted ARK protected by the
+     * Recovery Key-derived KEK.
+     *
+     * Recovery Key itself remains local
+     * inside the Recovery Kit.
+     */
+    recoveryRootKey: {
+      recoveryVersion: recoveryEnvelope.recoveryVersion,
+
+      rootKeyVersion: recoveryEnvelope.rootKeyVersion,
+
+      envelopeVersion: recoveryEnvelope.envelopeVersion,
+
+      envelope: encodeBase64Url(recoveryEnvelope.encryptedKey),
+
+      aad: recoveryRootKeyAad(profile.id, recoveryEnvelope.rootKeyVersion),
+    },
+
+    /*
+     * Context for the new Master
+     * Password-protected ARK envelope.
+     *
+     * We do not return the current
+     * password-protected ciphertext
+     * because recovery does not need it.
+     */
+    rootKey: {
+      keyVersion: rootEnvelope.keyVersion,
+
+      envelopeVersion: rootEnvelope.envelopeVersion,
+
+      updatedAt: rootEnvelope.updatedAt.toISOString(),
+
+      aad: rootKeyAad(profile.id, rootEnvelope.keyVersion),
+    },
+  };
+}
+
+export async function completeMasterPasswordRecovery(
+  userId: string,
+  input: CompleteMasterPasswordRecoveryInput,
+): Promise<void> {
+  const kdfSalt = decodeCanonicalBase64Url(input.kdf.salt, KDF_SALT_BYTES);
+
+  const rootKeyEnvelope = decodeCanonicalBase64Url(input.rootKey.envelope, KEY_ENVELOPE_BYTES);
+
+  /*
+   * Envelope metadata must agree with the
+   * actual serialized envelope.
+   *
+   * Current format:
+   * byte 0 = envelope version.
+   */
+  if (rootKeyEnvelope[0] !== KEY_ENVELOPE_VERSION) {
+    throw new Error('INVALID_CRYPTO_MATERIAL');
+  }
+
+  const expectedUpdatedAt = new Date(input.rootKey.expectedUpdatedAt);
+
+  await prisma.$transaction(async (tx) => {
+    const now = new Date();
+
+    const profile = await tx.userCryptoProfile.findUnique({
+      where: {
+        userId,
+      },
+
+      include: {
+        rootKeyEnvelopes: {
+          orderBy: {
+            keyVersion: 'desc',
+          },
+
+          take: 1,
+        },
+      },
+    });
+
+    if (!profile) {
+      throw new Error('CRYPTO_STATE_INVALID');
+    }
+
+    if (profile.protocolVersion !== CRYPTO_PROTOCOL_VERSION) {
+      throw new Error('CRYPTO_PROTOCOL_UNSUPPORTED');
+    }
+
+    const currentRootEnvelope = profile.rootKeyEnvelopes[0];
+
+    if (!currentRootEnvelope) {
+      throw new Error('CRYPTO_STATE_INVALID');
+    }
+
+    /*
+     * Client must be completing recovery
+     * against the ARK version it originally
+     * received from GET /recovery.
+     */
+    if (
+      currentRootEnvelope.keyVersion !== input.rootKey.keyVersion ||
+      input.recovery.rootKeyVersion !== currentRootEnvelope.keyVersion
+    ) {
+      throw new Error('RECOVERY_CONFLICT');
+    }
+
+    const recoveryEnvelope = await tx.recoveryEnvelope.findFirst({
+      where: {
+        cryptoProfileId: profile.id,
+
+        rootKeyVersion: currentRootEnvelope.keyVersion,
+      },
+
+      orderBy: {
+        recoveryVersion: 'desc',
+      },
+    });
+
+    if (!recoveryEnvelope) {
+      throw new Error('CRYPTO_STATE_INVALID');
+    }
+
+    if (
+      recoveryEnvelope.recoveryVersion !== input.recovery.recoveryVersion ||
+      recoveryEnvelope.rootKeyVersion !== input.recovery.rootKeyVersion
+    ) {
+      throw new Error('RECOVERY_CONFLICT');
+    }
+
+    /*
+     * OCC / compare-and-set.
+     *
+     * If another recovery already replaced
+     * this envelope, updatedAt no longer
+     * matches and this request must fail.
+     */
+    const rootUpdate = await tx.rootKeyEnvelope.updateMany({
+      where: {
+        id: currentRootEnvelope.id,
+
+        cryptoProfileId: profile.id,
+
+        keyVersion: currentRootEnvelope.keyVersion,
+
+        updatedAt: expectedUpdatedAt,
+      },
+
+      data: {
+        envelopeVersion: input.rootKey.envelopeVersion,
+
+        encryptedKey: rootKeyEnvelope,
+      },
+    });
+
+    if (rootUpdate.count !== 1) {
+      throw new Error('RECOVERY_CONFLICT');
+    }
+
+    /*
+     * Store the new Master Password KDF
+     * configuration.
+     *
+     * Account Secret is never sent here.
+     */
+    await tx.userCryptoProfile.update({
+      where: {
+        id: profile.id,
+      },
+
+      data: {
+        protocolVersion: input.protocolVersion,
+
+        kdfAlgorithm: input.kdf.algorithm,
+
+        kdfProfileVersion: input.kdf.profileVersion,
+
+        argon2MemoryKib: input.kdf.memoryKib,
+
+        argon2Iterations: input.kdf.iterations,
+
+        argon2Parallelism: input.kdf.parallelism,
+
+        kdfSalt,
+      },
+    });
+
+    /*
+     * Security boundary:
+     *
+     * Recovery invalidates every existing
+     * authenticated session for the account,
+     * including the one executing recovery.
+     */
+    await tx.session.updateMany({
+      where: {
+        userId,
+
+        revokedAt: null,
+      },
+
+      data: {
+        revokedAt: now,
+      },
+    });
+  });
 }
