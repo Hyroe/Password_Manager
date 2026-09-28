@@ -2,6 +2,7 @@ mod bootstrap;
 mod envelope;
 mod item;
 mod kdf;
+mod recovery;
 mod unlock;
 
 use wasm_bindgen::prelude::*;
@@ -15,6 +16,8 @@ use kdf::{
 };
 
 pub use bootstrap::{AccountBootstrapResult, create_account_bootstrap};
+
+pub use recovery::{MasterPasswordRecoveryResult, recover_master_password};
 
 const SECRET_LENGTH: usize = KEY_LENGTH;
 
