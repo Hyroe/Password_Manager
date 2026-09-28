@@ -4,6 +4,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import { resolveRuntimeRedirect, type RuntimeState } from './lib/runtimeRouting';
 
+import { routes } from './lib/routes';
+
 import {
   browserSupportsWebAuthn,
   startRegistration,
@@ -222,6 +224,10 @@ export default function App() {
   const location = useLocation();
 
   const navigate = useNavigate();
+
+  const isLoginRoute = location.pathname === routes.login;
+
+  const isRegisterRoute = location.pathname === routes.register;
 
   const syncVaultItemsNow = useCallback(
     async (showStatus: boolean) => {
@@ -1906,6 +1912,10 @@ export default function App() {
     setEmail('');
 
     setMessage('Account created. Sign in with your passkey.');
+
+    navigate(routes.login, {
+      replace: true,
+    });
   }
 
   function discardRecoveryKit() {
@@ -2651,154 +2661,169 @@ export default function App() {
 
       {runtimeState === 'SIGNED_OUT' && (
         <>
-          {!registrationId && !completedAccount && (
-            <>
-              <section>
-                <h2>Sign in</h2>
-
-                <p>Authenticate with your passkey.</p>
-
-                <button
-                  type="button"
-
-                  disabled={loading || !webAuthnSupported}
-
-                  onClick={handlePasskeyLogin}
-                >
-                  Sign in with passkey
-                </button>
-              </section>
-
-              <section>
-                <h2>Create account</h2>
-
-                <input
-                  type="email"
-
-                  value={email}
-
-                  placeholder="you@example.com"
-
-                  autoComplete="email"
-
-                  onChange={(event) => setEmail(event.target.value)}
-                />
-
-                <button
-                  type="button"
-
-                  disabled={loading || !email}
-
-                  onClick={startAccountRegistration}
-                >
-                  Start registration
-                </button>
-              </section>
-            </>
-          )}
-
-          {registrationId && !registrationToken && !bootstrapToken && !completedAccount && (
+          {isLoginRoute && (
             <section>
-              <h2>Verify email</h2>
+              <h2>Sign in</h2>
 
-              <p>Copy the local verification token from the API terminal.</p>
-
-              <input
-                type="text"
-
-                value={verificationToken}
-
-                placeholder="Verification token"
-
-                onChange={(event) => setVerificationToken(event.target.value)}
-              />
-
-              <button type="button" disabled={loading || !verificationToken} onClick={verifyEmail}>
-                Verify email
-              </button>
-            </section>
-          )}
-
-          {registrationToken && !bootstrapToken && !completedAccount && (
-            <section>
-              <h2>Create passkey</h2>
+              <p>Authenticate with your passkey.</p>
 
               <button
                 type="button"
-
                 disabled={loading || !webAuthnSupported}
-
-                onClick={registerPasskey}
+                onClick={handlePasskeyLogin}
               >
-                Create passkey
+                Sign in with passkey
+              </button>
+
+              <hr />
+
+              <p>Need an account?</p>
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.register);
+                }}
+              >
+                Create account
               </button>
             </section>
           )}
 
-          {bootstrapToken && !bootstrapOptions && !completedAccount && (
-            <section>
-              <h2>Protect your vault</h2>
+          {isRegisterRoute && (
+            <>
+              {!registrationId && !completedAccount && (
+                <section>
+                  <h2>Create account</h2>
 
-              <p>Your Master Password never leaves this browser.</p>
+                  <input
+                    type="email"
+                    value={email}
+                    placeholder="you@example.com"
+                    autoComplete="email"
+                    onChange={(event) => setEmail(event.target.value)}
+                  />
 
-              <input
-                ref={masterPasswordRef}
+                  <button
+                    type="button"
+                    disabled={loading || !email}
+                    onClick={startAccountRegistration}
+                  >
+                    Start registration
+                  </button>
 
-                type="password"
+                  <hr />
 
-                placeholder="Master Password"
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      navigate(routes.login);
+                    }}
+                  >
+                    Sign in instead
+                  </button>
+                </section>
+              )}
 
-                autoComplete="new-password"
-              />
+              {registrationId && !registrationToken && !bootstrapToken && !completedAccount && (
+                <section>
+                  <h2>Verify email</h2>
 
-              <input
-                ref={confirmMasterPasswordRef}
+                  <p>Copy the local verification token from the API terminal.</p>
 
-                type="password"
+                  <input
+                    type="text"
+                    value={verificationToken}
+                    placeholder="Verification token"
+                    onChange={(event) => setVerificationToken(event.target.value)}
+                  />
 
-                placeholder="Confirm Master Password"
+                  <button
+                    type="button"
+                    disabled={loading || !verificationToken}
+                    onClick={verifyEmail}
+                  >
+                    Verify email
+                  </button>
+                </section>
+              )}
 
-                autoComplete="new-password"
-              />
+              {registrationToken && !bootstrapToken && !completedAccount && (
+                <section>
+                  <h2>Create passkey</h2>
 
-              <button type="button" disabled={loading} onClick={prepareCryptoBootstrap}>
-                Create vault keys
-              </button>
-            </section>
-          )}
+                  <button
+                    type="button"
+                    disabled={loading || !webAuthnSupported}
+                    onClick={registerPasskey}
+                  >
+                    Create passkey
+                  </button>
+                </section>
+              )}
 
-          {bootstrapOptions && !recoveryKitDownloaded && !completedAccount && (
-            <section>
-              <h2>Save Recovery Kit</h2>
+              {bootstrapToken && !bootstrapOptions && !completedAccount && (
+                <section>
+                  <h2>Protect your vault</h2>
 
-              <p>Store it securely and separately from your Master Password.</p>
+                  <p>Your Master Password never leaves this browser.</p>
 
-              <button type="button" disabled={loading} onClick={saveRecoveryKit}>
-                Download Recovery Kit
-              </button>
-            </section>
-          )}
+                  <input
+                    ref={masterPasswordRef}
+                    type="password"
+                    placeholder="Master Password"
+                    autoComplete="new-password"
+                  />
 
-          {bootstrapOptions && recoveryKitDownloaded && !completedAccount && (
-            <section>
-              <h2>Activate account</h2>
+                  <input
+                    ref={confirmMasterPasswordRef}
+                    type="password"
+                    placeholder="Confirm Master Password"
+                    autoComplete="new-password"
+                  />
 
-              <button type="button" disabled={loading} onClick={activateAccount}>
-                Activate account
-              </button>
-            </section>
-          )}
+                  <button type="button" disabled={loading} onClick={prepareCryptoBootstrap}>
+                    Create vault keys
+                  </button>
+                </section>
+              )}
 
-          {completedAccount && (
-            <section>
-              <h2>Account ready</h2>
+              {bootstrapOptions && !recoveryKitDownloaded && !completedAccount && (
+                <section>
+                  <h2>Save Recovery Kit</h2>
 
-              <p>Your encrypted personal vault has been created.</p>
+                  <p>Store it securely and separately from your Master Password.</p>
 
-              <button type="button" onClick={finishOnboarding}>
-                Continue to sign in
-              </button>
-            </section>
+                  <button type="button" disabled={loading} onClick={saveRecoveryKit}>
+                    Download Recovery Kit
+                  </button>
+                </section>
+              )}
+
+              {bootstrapOptions && recoveryKitDownloaded && !completedAccount && (
+                <section>
+                  <h2>Activate account</h2>
+
+                  <button type="button" disabled={loading} onClick={activateAccount}>
+                    Activate account
+                  </button>
+                </section>
+              )}
+
+              {completedAccount && (
+                <section>
+                  <h2>Account ready</h2>
+
+                  <p>Your encrypted personal vault has been created.</p>
+
+                  <button type="button" onClick={finishOnboarding}>
+                    Continue to sign in
+                  </button>
+                </section>
+              )}
+            </>
           )}
         </>
       )}
