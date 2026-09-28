@@ -2,6 +2,7 @@ mod bootstrap;
 mod envelope;
 mod item;
 mod kdf;
+mod master_password_change;
 mod recovery;
 mod unlock;
 
@@ -18,6 +19,8 @@ use kdf::{
 pub use bootstrap::{AccountBootstrapResult, create_account_bootstrap};
 
 pub use recovery::{MasterPasswordRecoveryResult, recover_master_password};
+
+pub use master_password_change::{MasterPasswordChangeResult, change_master_password};
 
 const SECRET_LENGTH: usize = KEY_LENGTH;
 
