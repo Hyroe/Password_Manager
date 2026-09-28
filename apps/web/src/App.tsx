@@ -9,6 +9,12 @@ import { getVaultItemIdFromPath } from './lib/vaultRouting';
 import { routes } from './lib/routes';
 
 import {
+  createVaultSearchEntry,
+  filterVaultSearchEntries,
+  type VaultSearchEntry,
+} from './lib/vaultSearch';
+
+import {
   browserSupportsWebAuthn,
   startRegistration,
   type PublicKeyCredentialCreationOptionsJSON,
@@ -53,6 +59,7 @@ import type { EncryptedVaultItem } from './lib/vaultItemApi';
 import {
   createLoginVaultItem,
   deleteVaultItem,
+  decryptStoredLoginItem,
   listVaultItemsIncludingDeleted,
   loadAndDecryptLoginItem,
   restoreVaultItem,
@@ -229,6 +236,18 @@ export default function App() {
 
   const [managedSessions, setManagedSessions] = useState<ManagedSession[]>([]);
 
+  const [vaultSearchEntries, setVaultSearchEntries] = useState<VaultSearchEntry[]>([]);
+
+  const [vaultSearchQuery, setVaultSearchQuery] = useState('');
+
+  const [vaultSearchIndexing, setVaultSearchIndexing] = useState(false);
+
+  const [vaultSearchIndexError, setVaultSearchIndexError] = useState('');
+
+  const vaultSearchGenerationRef = useRef(0);
+
+  const vaultSearchBuildPromiseRef = useRef<Promise<void> | null>(null);
+
   const location = useLocation();
 
   const navigate = useNavigate();
@@ -248,6 +267,105 @@ export default function App() {
   const isVaultItemRoute = routedVaultItemId !== null;
 
   const routedItemLoadRef = useRef<string | null>(null);
+
+  const filteredVaultSearchEntries = filterVaultSearchEntries(vaultSearchEntries, vaultSearchQuery);
+
+  const rebuildVaultSearchIndex = useCallback(
+    async (items: EncryptedVaultItem[]): Promise<void> => {
+      const vault = unlockedVaultRef.current;
+      const vaultId = unlockedVaultIdRef.current;
+
+      if (!vault || !vaultId) {
+        return;
+      }
+
+      const generation = vaultSearchGenerationRef.current + 1;
+
+      vaultSearchGenerationRef.current = generation;
+
+      const previousBuild = vaultSearchBuildPromiseRef.current;
+
+      const buildPromise = (async () => {
+        if (previousBuild) {
+          try {
+            await previousBuild;
+          } catch {
+            // A previous index build must not block a newer rebuild.
+          }
+        }
+
+        if (
+          vaultSearchGenerationRef.current !== generation ||
+          unlockedVaultRef.current !== vault ||
+          unlockedVaultIdRef.current !== vaultId
+        ) {
+          return;
+        }
+
+        setVaultSearchIndexing(true);
+        setVaultSearchIndexError('');
+
+        const entries: VaultSearchEntry[] = [];
+
+        let failedItems = 0;
+
+        for (const item of items) {
+          if (
+            vaultSearchGenerationRef.current !== generation ||
+            unlockedVaultRef.current !== vault ||
+            unlockedVaultIdRef.current !== vaultId
+          ) {
+            return;
+          }
+
+          try {
+            const login = await decryptStoredLoginItem(vault, vaultId, item);
+
+            if (
+              vaultSearchGenerationRef.current !== generation ||
+              unlockedVaultRef.current !== vault ||
+              unlockedVaultIdRef.current !== vaultId
+            ) {
+              return;
+            }
+
+            entries.push(createVaultSearchEntry(item.id, login));
+          } catch {
+            failedItems += 1;
+          }
+        }
+
+        if (
+          vaultSearchGenerationRef.current !== generation ||
+          unlockedVaultRef.current !== vault ||
+          unlockedVaultIdRef.current !== vaultId
+        ) {
+          return;
+        }
+
+        setVaultSearchEntries(entries);
+
+        if (failedItems > 0) {
+          setVaultSearchIndexError(
+            `${failedItems} vault item${failedItems === 1 ? '' : 's'} could not be indexed locally.`,
+          );
+        }
+      })().finally(() => {
+        if (vaultSearchBuildPromiseRef.current === buildPromise) {
+          vaultSearchBuildPromiseRef.current = null;
+
+          if (vaultSearchGenerationRef.current === generation) {
+            setVaultSearchIndexing(false);
+          }
+        }
+      });
+
+      vaultSearchBuildPromiseRef.current = buildPromise;
+
+      await buildPromise;
+    },
+    [],
+  );
 
   const syncVaultItemsNow = useCallback(
     async (showStatus: boolean) => {
@@ -314,6 +432,10 @@ export default function App() {
 
         vaultSyncCursorRef.current = cursor ?? null;
 
+        if (receivedChanges > 0) {
+          await rebuildVaultSearchIndex(collections.activeItems);
+        }
+
         if (showStatus) {
           setMessage(
             receivedChanges === 0
@@ -325,7 +447,7 @@ export default function App() {
         vaultSyncInFlightRef.current = false;
       }
     },
-    [runtimeState],
+    [runtimeState, rebuildVaultSearchIndex],
   );
 
   const clearVaultUiState = useCallback(() => {
@@ -334,6 +456,13 @@ export default function App() {
     selectedItemIdRef.current = null;
     vaultSyncCursorRef.current = null;
     vaultSyncInFlightRef.current = false;
+
+    vaultSearchGenerationRef.current += 1;
+
+    setVaultSearchEntries([]);
+    setVaultSearchQuery('');
+    setVaultSearchIndexing(false);
+    setVaultSearchIndexError('');
 
     setVaultItems([]);
     setSelectedLogin(null);
@@ -388,14 +517,34 @@ export default function App() {
   const disposeUnlockedVault = useCallback(() => {
     const unlocked = unlockedVaultRef.current;
 
-    if (unlocked) {
+    if (!unlocked) {
+      return;
+    }
+
+    /*
+     * Prevent new vault operations from starting immediately.
+     * If a local search-index decrypt is already in flight,
+     * keep this WASM instance alive until that build settles.
+     */
+    unlockedVaultRef.current = null;
+    unlockedVaultIdRef.current = null;
+
+    vaultSearchGenerationRef.current += 1;
+
+    const searchBuild = vaultSearchBuildPromiseRef.current;
+
+    const dispose = () => {
       unlocked.clear();
       unlocked.free();
+    };
 
-      unlockedVaultRef.current = null;
+    if (searchBuild) {
+      void searchBuild.then(dispose, dispose);
 
-      unlockedVaultIdRef.current = null;
+      return;
     }
+
+    dispose();
   }, []);
 
   const handleBackgroundSyncError = useCallback(
@@ -665,6 +814,8 @@ export default function App() {
     setDeletedVaultItems(collections.deletedItems);
 
     vaultSyncCursorRef.current = cursor ?? null;
+
+    await rebuildVaultSearchIndex(collections.activeItems);
   }
 
   async function startAccountRegistration() {
@@ -1146,6 +1297,9 @@ export default function App() {
 
         setVaultItems([]);
         setDeletedVaultItems([]);
+        setVaultSearchEntries([]);
+        setVaultSearchQuery('');
+        setVaultSearchIndexError('');
         setError('Vault unlocked, but items could not be loaded.');
       }
 
@@ -1977,6 +2131,8 @@ export default function App() {
 
       setVaultItems(activeItems);
       setDeletedVaultItems(deletedItems);
+
+      await rebuildVaultSearchIndex(activeItems);
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
@@ -2618,9 +2774,24 @@ export default function App() {
 
               <h3>Vault items</h3>
 
+              <div>
+                <label>
+                  Search
+                  <input
+                    type="search"
+                    value={vaultSearchQuery}
+                    placeholder="Search name, username, or URL"
+                    autoComplete="off"
+                    onChange={(event) => {
+                      setVaultSearchQuery(event.target.value);
+                    }}
+                  />
+                </label>
+              </div>
+
               <button
                 type="button"
-                disabled={loading}
+                disabled={loading || vaultSearchIndexing}
                 onClick={() => {
                   void refreshVaultItems();
                 }}
@@ -2628,29 +2799,49 @@ export default function App() {
                 Refresh
               </button>
 
+              {vaultSearchIndexing && <p>Building local search index…</p>}
+
+              {vaultSearchIndexError && <p role="alert">{vaultSearchIndexError}</p>}
+
               {vaultItems.length === 0 ? (
                 <p>No saved items yet.</p>
+              ) : vaultSearchIndexing &&
+                vaultSearchEntries.length === 0 ? null : vaultSearchEntries.length === 0 ? (
+                <p>No vault items could be indexed locally.</p>
+              ) : filteredVaultSearchEntries.length === 0 ? (
+                <p>No matching logins.</p>
               ) : (
                 <ul>
-                  {vaultItems.map((item) => (
-                    <li key={item.id}>
-                      <code>{item.id}</code>
-                      {' — revision '}
-                      {item.revisionNumber}{' '}
+                  {filteredVaultSearchEntries.map((entry) => (
+                    <li key={entry.itemId}>
+                      <strong>{entry.name}</strong>
+                      {entry.username && (
+                        <>
+                          {' — '}
+                          {entry.username}
+                        </>
+                      )}
+                      {entry.urls[0] && (
+                        <>
+                          <br />
+                          {entry.urls[0]}
+                        </>
+                      )}
+                      <br />
                       <button
                         type="button"
-                        disabled={loading}
+                        disabled={loading || vaultSearchIndexing}
                         onClick={() => {
-                          handleViewLoginItem(item.id);
+                          handleViewLoginItem(entry.itemId);
                         }}
                       >
                         View
                       </button>{' '}
                       <button
                         type="button"
-                        disabled={loading}
+                        disabled={loading || vaultSearchIndexing}
                         onClick={() => {
-                          void handleDeleteLoginItem(item.id);
+                          void handleDeleteLoginItem(entry.itemId);
                         }}
                       >
                         Delete
