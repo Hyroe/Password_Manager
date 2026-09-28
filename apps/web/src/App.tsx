@@ -4,6 +4,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import { resolveRuntimeRedirect, type RuntimeState } from './lib/runtimeRouting';
 
+import { getVaultItemIdFromPath } from './lib/vaultRouting';
+
 import { routes } from './lib/routes';
 
 import {
@@ -235,6 +237,12 @@ export default function App() {
 
   const isRecoveryRoute = location.pathname === routes.recovery;
 
+  const routedVaultItemId = getVaultItemIdFromPath(location.pathname);
+
+  const isVaultItemRoute = routedVaultItemId !== null;
+
+  const routedItemLoadRef = useRef<string | null>(null);
+
   const syncVaultItemsNow = useCallback(
     async (showStatus: boolean) => {
       const vaultId = unlockedVaultIdRef.current;
@@ -443,9 +451,14 @@ export default function App() {
 
       if (selectedItemId === itemId) {
         selectedItemIdRef.current = null;
+
         setEditingLogin(false);
         setSelectedLogin(null);
         setSelectedItemId(null);
+
+        navigate(routes.vault, {
+          replace: true,
+        });
       }
 
       await refreshVaultItems();
@@ -1503,66 +1516,134 @@ export default function App() {
     }
   }
 
-  async function handleViewLoginItem(itemId: string) {
-    const vault = unlockedVaultRef.current;
-
-    const vaultId = unlockedVaultIdRef.current;
-
-    if (!vault || !vaultId) {
-      setError('Vault is locked.');
-
-      return;
-    }
-
-    setLoading(true);
-
+  function handleViewLoginItem(itemId: string) {
     resetMessages();
 
-    /*
+    navigate(routes.vaultItem(itemId));
+  }
 
-      * Drop any previously decrypted item
+  const loadRoutedLoginItem = useCallback(
+    async (itemId: string) => {
+      if (routedItemLoadRef.current === itemId) {
+        return;
+      }
 
-      * before loading another one.
+      const vault = unlockedVaultRef.current;
 
-      */
+      const vaultId = unlockedVaultIdRef.current;
 
-    setSelectedLogin(null);
-    selectedItemIdRef.current = null;
-    setSelectedItemId(null);
-    setEditingLogin(false);
-
-    try {
-      const login = await loadAndDecryptLoginItem(vault, vaultId, itemId);
-
-      setSelectedLogin(login);
-      selectedItemIdRef.current = itemId;
-      setSelectedItemId(itemId);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        disposeUnlockedVault();
-
-        clearVaultUiState();
-
-        setAuthenticatedUser(null);
-
-        setRuntimeState('SIGNED_OUT');
-
-        setError('Your session has expired. Authenticate again.');
+      if (!vault || !vaultId) {
+        setError('Vault is locked.');
 
         return;
       }
 
-      setError(error instanceof Error ? error.message : 'Login could not be decrypted.');
-    } finally {
-      setLoading(false);
+      routedItemLoadRef.current = itemId;
+
+      setLoading(true);
+
+      setError('');
+      setMessage('');
+
+      /*
+       * Drop plaintext belonging to the
+       * previously selected item before
+       * decrypting another item.
+       */
+      selectedItemIdRef.current = null;
+
+      setEditingLogin(false);
+      setSelectedLogin(null);
+      setSelectedItemId(null);
+
+      try {
+        const login = await loadAndDecryptLoginItem(vault, vaultId, itemId);
+
+        selectedItemIdRef.current = itemId;
+
+        setSelectedItemId(itemId);
+        setSelectedLogin(login);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          disposeUnlockedVault();
+
+          clearVaultUiState();
+
+          setAuthenticatedUser(null);
+
+          setRuntimeState('SIGNED_OUT');
+
+          setError('Your session has expired. Authenticate again.');
+
+          return;
+        }
+
+        if (error instanceof ApiError && error.code === 'ITEM_NOT_FOUND') {
+          setError('This vault item no longer exists.');
+
+          return;
+        }
+
+        setError(error instanceof Error ? error.message : 'Login could not be decrypted.');
+      } finally {
+        if (routedItemLoadRef.current === itemId) {
+          routedItemLoadRef.current = null;
+        }
+
+        setLoading(false);
+      }
+    },
+    [clearVaultUiState, disposeUnlockedVault],
+  );
+
+  useEffect(() => {
+    if (runtimeState !== 'UNLOCKED') {
+      return;
     }
-  }
+
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) {
+        return;
+      }
+
+      /*
+       * Leaving an item route must discard
+       * any decrypted plaintext from React state.
+       */
+      if (!routedVaultItemId) {
+        selectedItemIdRef.current = null;
+
+        setEditingLogin(false);
+        setSelectedLogin(null);
+        setSelectedItemId(null);
+
+        if (editPasswordRef.current) {
+          editPasswordRef.current.value = '';
+        }
+
+        return;
+      }
+
+      /*
+       * The requested route already matches
+       * the decrypted item currently in memory.
+       */
+      if (selectedItemId === routedVaultItemId) {
+        return;
+      }
+
+      void loadRoutedLoginItem(routedVaultItemId);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeState, routedVaultItemId, selectedItemId, loadRoutedLoginItem]);
 
   function handleCloseLoginItem() {
-    selectedItemIdRef.current = null;
-    setEditingLogin(false);
-    setSelectedLogin(null);
-    setSelectedItemId(null);
+    navigate(routes.vault);
   }
 
   function handleStartEditingLogin() {
@@ -2433,296 +2514,287 @@ export default function App() {
 
           <p>Vault keys are available only inside the local WASM runtime.</p>
 
-          <hr />
-
-          <h3>New login</h3>
-
-          <div>
-            <label>
-              Name
-              <input ref={loginNameRef} type="text" autoComplete="off" placeholder="GitHub" />
-            </label>
-          </div>
-
-          <div>
-            <label>
-              Username
-              <input
-                ref={loginUsernameRef}
-
-                type="text"
-
-                autoComplete="off"
-
-                placeholder="you@example.com"
-              />
-            </label>
-          </div>
-
-          <div>
-            <label>
-              Password
-              <input
-                ref={loginPasswordRef}
-
-                type="password"
-
-                autoComplete="off"
-
-                placeholder="Password"
-              />
-            </label>
-          </div>
-
-          <div>
-            <label>
-              URL
-              <input
-                ref={loginUrlRef}
-
-                type="url"
-
-                autoComplete="off"
-
-                placeholder="https://example.com"
-              />
-            </label>
-          </div>
-
-          <div>
-            <label>
-              Notes
-              <textarea ref={loginNotesRef} placeholder="Optional notes" />
-            </label>
-          </div>
-
-          <button type="button" disabled={loading} onClick={handleCreateLoginItem}>
-            Save login
-          </button>
-
-          <hr />
-
-          <h3>Vault items</h3>
-
-          <button
-            type="button"
-
-            disabled={loading}
-
-            onClick={() => {
-              void refreshVaultItems();
-            }}
-          >
-            Refresh
-          </button>
-
-          {vaultItems.length === 0 ? (
-            <p>No saved items yet.</p>
-          ) : (
-            <ul>
-              {vaultItems.map((item) => (
-                <li key={item.id}>
-                  <code>{item.id}</code>
-                  {' — revision '}
-                  {item.revisionNumber}{' '}
-                  <button
-                    type="button"
-
-                    disabled={loading}
-
-                    onClick={() => {
-                      void handleViewLoginItem(item.id);
-                    }}
-                  >
-                    View
-                  </button>{' '}
-                  <button
-                    type="button"
-
-                    disabled={loading}
-
-                    onClick={() => {
-                      void handleDeleteLoginItem(item.id);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <hr />
-
-          <h3>Deleted items</h3>
-
-          {deletedVaultItems.length === 0 ? (
-            <p>No deleted items.</p>
-          ) : (
-            <ul>
-              {deletedVaultItems.map((item) => (
-                <li key={item.id}>
-                  <code>{item.id}</code>
-                  {' — revision '}
-                  {item.revisionNumber}
-                  {' — deleted '}
-                  {item.deletedAt ? new Date(item.deletedAt).toLocaleString() : ''}{' '}
-                  <button
-                    type="button"
-
-                    disabled={loading}
-
-                    onClick={() => {
-                      void handleRestoreLoginItem(item.id);
-                    }}
-                  >
-                    Restore
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {selectedLogin && selectedItemId && (
+          {isVaultRoute && (
             <>
               <hr />
 
-              <h3>Decrypted login</h3>
+              <h3>New login</h3>
 
-              <p>
-                <strong>Item ID:</strong> <code>{selectedItemId}</code>
-              </p>
+              <div>
+                <label>
+                  Name
+                  <input ref={loginNameRef} type="text" autoComplete="off" placeholder="GitHub" />
+                </label>
+              </div>
 
-              {!editingLogin ? (
-                <>
-                  <p>
-                    <strong>Name:</strong> {selectedLogin.name}
-                  </p>
+              <div>
+                <label>
+                  Username
+                  <input
+                    ref={loginUsernameRef}
+                    type="text"
+                    autoComplete="off"
+                    placeholder="you@example.com"
+                  />
+                </label>
+              </div>
 
-                  <p>
-                    <strong>Username:</strong> {selectedLogin.username}
-                  </p>
+              <div>
+                <label>
+                  Password
+                  <input
+                    ref={loginPasswordRef}
+                    type="password"
+                    autoComplete="off"
+                    placeholder="Password"
+                  />
+                </label>
+              </div>
 
-                  <p>
-                    <strong>Password:</strong> <code>{selectedLogin.password}</code>
-                  </p>
+              <div>
+                <label>
+                  URL
+                  <input
+                    ref={loginUrlRef}
+                    type="url"
+                    autoComplete="off"
+                    placeholder="https://example.com"
+                  />
+                </label>
+              </div>
 
-                  <p>
-                    <strong>URLs:</strong>
-                  </p>
+              <div>
+                <label>
+                  Notes
+                  <textarea ref={loginNotesRef} placeholder="Optional notes" />
+                </label>
+              </div>
 
-                  {selectedLogin.urls.length === 0 ? (
-                    <p>None</p>
-                  ) : (
-                    <ul>
-                      {selectedLogin.urls.map((url) => (
-                        <li key={url}>{url}</li>
-                      ))}
-                    </ul>
-                  )}
+              <button type="button" disabled={loading} onClick={handleCreateLoginItem}>
+                Save login
+              </button>
 
-                  <p>
-                    <strong>Notes:</strong> {selectedLogin.notes}
-                  </p>
+              <hr />
 
-                  <button type="button" disabled={loading} onClick={handleStartEditingLogin}>
-                    Edit
-                  </button>
+              <h3>Vault items</h3>
 
-                  <button
-                    type="button"
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  void refreshVaultItems();
+                }}
+              >
+                Refresh
+              </button>
 
-                    disabled={loading}
-
-                    onClick={() => {
-                      void handleDeleteLoginItem(selectedItemId);
-                    }}
-                  >
-                    Delete
-                  </button>
-
-                  <button type="button" onClick={handleCloseLoginItem}>
-                    Close
-                  </button>
-                </>
+              {vaultItems.length === 0 ? (
+                <p>No saved items yet.</p>
               ) : (
+                <ul>
+                  {vaultItems.map((item) => (
+                    <li key={item.id}>
+                      <code>{item.id}</code>
+                      {' — revision '}
+                      {item.revisionNumber}{' '}
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          handleViewLoginItem(item.id);
+                        }}
+                      >
+                        View
+                      </button>{' '}
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          void handleDeleteLoginItem(item.id);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <hr />
+
+              <h3>Deleted items</h3>
+
+              {deletedVaultItems.length === 0 ? (
+                <p>No deleted items.</p>
+              ) : (
+                <ul>
+                  {deletedVaultItems.map((item) => (
+                    <li key={item.id}>
+                      <code>{item.id}</code>
+                      {' — revision '}
+                      {item.revisionNumber}
+                      {' — deleted '}
+                      {item.deletedAt ? new Date(item.deletedAt).toLocaleString() : ''}{' '}
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          void handleRestoreLoginItem(item.id);
+                        }}
+                      >
+                        Restore
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+
+          {isVaultItemRoute && (
+            <>
+              <hr />
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.vault);
+                }}
+              >
+                Back to vault
+              </button>
+
+              {loading && !selectedLogin && <p>Loading login…</p>}
+
+              {!loading && !selectedLogin && <p>Vault item could not be loaded.</p>}
+
+              {selectedLogin && selectedItemId && (
                 <>
-                  <h4>Edit login</h4>
+                  <h3>Decrypted login</h3>
 
-                  <div>
-                    <label>
-                      Name
-                      <input
-                        ref={editNameRef}
+                  <p>
+                    <strong>Item ID:</strong> <code>{selectedItemId}</code>
+                  </p>
 
-                        type="text"
+                  {!editingLogin ? (
+                    <>
+                      <p>
+                        <strong>Name:</strong> {selectedLogin.name}
+                      </p>
 
-                        autoComplete="off"
+                      <p>
+                        <strong>Username:</strong> {selectedLogin.username}
+                      </p>
 
-                        defaultValue={selectedLogin.name}
-                      />
-                    </label>
-                  </div>
+                      <p>
+                        <strong>Password:</strong> <code>{selectedLogin.password}</code>
+                      </p>
 
-                  <div>
-                    <label>
-                      Username
-                      <input
-                        ref={editUsernameRef}
+                      <p>
+                        <strong>URLs:</strong>
+                      </p>
 
-                        type="text"
+                      {selectedLogin.urls.length === 0 ? (
+                        <p>None</p>
+                      ) : (
+                        <ul>
+                          {selectedLogin.urls.map((url) => (
+                            <li key={url}>{url}</li>
+                          ))}
+                        </ul>
+                      )}
 
-                        autoComplete="off"
+                      <p>
+                        <strong>Notes:</strong> {selectedLogin.notes}
+                      </p>
 
-                        defaultValue={selectedLogin.username}
-                      />
-                    </label>
-                  </div>
+                      <button type="button" disabled={loading} onClick={handleStartEditingLogin}>
+                        Edit
+                      </button>
 
-                  <div>
-                    <label>
-                      Password
-                      <input
-                        ref={editPasswordRef}
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          void handleDeleteLoginItem(selectedItemId);
+                        }}
+                      >
+                        Delete
+                      </button>
 
-                        type="password"
+                      <button type="button" onClick={handleCloseLoginItem}>
+                        Close
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <h4>Edit login</h4>
 
-                        autoComplete="off"
+                      <div>
+                        <label>
+                          Name
+                          <input
+                            ref={editNameRef}
+                            type="text"
+                            autoComplete="off"
+                            defaultValue={selectedLogin.name}
+                          />
+                        </label>
+                      </div>
 
-                        defaultValue={selectedLogin.password}
-                      />
-                    </label>
-                  </div>
+                      <div>
+                        <label>
+                          Username
+                          <input
+                            ref={editUsernameRef}
+                            type="text"
+                            autoComplete="off"
+                            defaultValue={selectedLogin.username}
+                          />
+                        </label>
+                      </div>
 
-                  <div>
-                    <label>
-                      URL
-                      <input
-                        ref={editUrlRef}
+                      <div>
+                        <label>
+                          Password
+                          <input
+                            ref={editPasswordRef}
+                            type="password"
+                            autoComplete="off"
+                            defaultValue={selectedLogin.password}
+                          />
+                        </label>
+                      </div>
 
-                        type="url"
+                      <div>
+                        <label>
+                          URL
+                          <input
+                            ref={editUrlRef}
+                            type="url"
+                            autoComplete="off"
+                            defaultValue={selectedLogin.urls[0] ?? ''}
+                          />
+                        </label>
+                      </div>
 
-                        autoComplete="off"
+                      <div>
+                        <label>
+                          Notes
+                          <textarea ref={editNotesRef} defaultValue={selectedLogin.notes} />
+                        </label>
+                      </div>
 
-                        defaultValue={selectedLogin.urls[0] ?? ''}
-                      />
-                    </label>
-                  </div>
+                      <button type="button" disabled={loading} onClick={handleUpdateLoginItem}>
+                        Save changes
+                      </button>
 
-                  <div>
-                    <label>
-                      Notes
-                      <textarea ref={editNotesRef} defaultValue={selectedLogin.notes} />
-                    </label>
-                  </div>
-
-                  <button type="button" disabled={loading} onClick={handleUpdateLoginItem}>
-                    Save changes
-                  </button>
-
-                  <button type="button" disabled={loading} onClick={handleCancelEditingLogin}>
-                    Cancel
-                  </button>
+                      <button type="button" disabled={loading} onClick={handleCancelEditingLogin}>
+                        Cancel
+                      </button>
+                    </>
+                  )}
                 </>
               )}
             </>
@@ -2732,9 +2804,7 @@ export default function App() {
 
           <button
             type="button"
-
             disabled={loading}
-
             onClick={() => {
               void handleSyncVaultItems();
             }}
