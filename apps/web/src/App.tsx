@@ -29,6 +29,7 @@ import { downloadRecoveryKit, readRecoveryKit, type RecoveryKit } from './lib/re
 
 import { unlockVault } from './lib/vaultUnlock';
 import { recoverVaultMasterPassword } from './lib/vaultRecovery';
+import { changeVaultMasterPassword } from './lib/vaultMasterPassword';
 
 import type { LoginItemPayload } from './lib/cryptoCore';
 
@@ -150,6 +151,12 @@ export default function App() {
   const recoveryKitFileRef = useRef<HTMLInputElement>(null);
 
   const unlockMasterPasswordRef = useRef<HTMLInputElement>(null);
+
+  const changeCurrentMasterPasswordRef = useRef<HTMLInputElement>(null);
+
+  const changeNewMasterPasswordRef = useRef<HTMLInputElement>(null);
+
+  const changeConfirmMasterPasswordRef = useRef<HTMLInputElement>(null);
 
   const recoveryNewMasterPasswordRef = useRef<HTMLInputElement>(null);
 
@@ -1108,6 +1115,129 @@ export default function App() {
     }
   }
 
+  async function handleChangeMasterPassword() {
+    const user = authenticatedUser;
+
+    const recoveryKit = recoveryKitRef.current;
+
+    const currentMasterPassword = changeCurrentMasterPasswordRef.current?.value ?? '';
+
+    const newMasterPassword = changeNewMasterPasswordRef.current?.value ?? '';
+
+    const confirmation = changeConfirmMasterPasswordRef.current?.value ?? '';
+
+    resetMessages();
+
+    if (!user || !recoveryKit) {
+      setError('Recovery Kit is required.');
+
+      return;
+    }
+
+    if (!currentMasterPassword) {
+      setError('Current Master Password is required.');
+
+      return;
+    }
+
+    if (newMasterPassword.length < 12) {
+      setError('New Master Password must contain at least 12 characters.');
+
+      return;
+    }
+
+    if (newMasterPassword !== confirmation) {
+      setError('Master Password confirmation does not match.');
+
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await changeVaultMasterPassword({
+        currentMasterPassword,
+
+        newMasterPassword,
+
+        recoveryKit,
+
+        authenticatedEmail: user.email,
+      });
+
+      /*
+       * Successful Master Password change revokes
+       * every server session, including this one.
+       *
+       * No local vault state should survive that
+       * security transition.
+       */
+      disposeUnlockedVault();
+
+      clearVaultUiState();
+
+      discardRecoveryKit();
+
+      setAuthenticatedUser(null);
+
+      setRuntimeState('SIGNED_OUT');
+
+      setMessage(
+        'Master Password changed successfully. Sign in again with your passkey, then unlock the vault with your new Master Password.',
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+
+        clearVaultUiState();
+
+        discardRecoveryKit();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError(
+          'Your session has expired. Authenticate again before changing your Master Password.',
+        );
+
+        return;
+      }
+
+      if (error instanceof ApiError && error.code === 'MASTER_PASSWORD_CHANGE_CONFLICT') {
+        setError(
+          'The cryptographic state changed while updating your Master Password. Reload the Recovery Kit and try again.',
+        );
+
+        return;
+      }
+
+      /*
+       * A wrong current Master Password fails
+       * locally while WASM tries to unwrap the ARK.
+       *
+       * Do not expose low-level crypto errors.
+       */
+      setError(
+        'Master Password could not be changed. Verify your current Master Password and try again.',
+      );
+    } finally {
+      if (changeCurrentMasterPasswordRef.current) {
+        changeCurrentMasterPasswordRef.current.value = '';
+      }
+
+      if (changeNewMasterPasswordRef.current) {
+        changeNewMasterPasswordRef.current.value = '';
+      }
+
+      if (changeConfirmMasterPasswordRef.current) {
+        changeConfirmMasterPasswordRef.current.value = '';
+      }
+
+      setLoading(false);
+    }
+  }
+
   async function handleRecoverMasterPassword() {
     const user = authenticatedUser;
 
@@ -1918,6 +2048,40 @@ export default function App() {
 
               <button type="button" disabled={loading} onClick={handleUnlockVault}>
                 Unlock vault
+              </button>
+
+              <hr />
+
+              <h3>Change Master Password</h3>
+
+              <p>
+                Replace your current Master Password without changing your Recovery Kit or
+                re-encrypting existing vault items.
+              </p>
+
+              <input
+                ref={changeCurrentMasterPasswordRef}
+                type="password"
+                placeholder="Current Master Password"
+                autoComplete="current-password"
+              />
+
+              <input
+                ref={changeNewMasterPasswordRef}
+                type="password"
+                placeholder="New Master Password"
+                autoComplete="new-password"
+              />
+
+              <input
+                ref={changeConfirmMasterPasswordRef}
+                type="password"
+                placeholder="Confirm new Master Password"
+                autoComplete="new-password"
+              />
+
+              <button type="button" disabled={loading} onClick={handleChangeMasterPassword}>
+                Change Master Password
               </button>
 
               <hr />
