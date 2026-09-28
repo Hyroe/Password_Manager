@@ -92,3 +92,58 @@ export async function revokeSession(sessionId: string): Promise<void> {
     },
   });
 }
+
+export interface ListedSession {
+  id: string;
+
+  createdAt: Date;
+  lastSeenAt: Date;
+
+  idleExpiresAt: Date;
+  absoluteExpiresAt: Date;
+
+  current: boolean;
+}
+
+export async function listActiveSessions(
+  userId: string,
+  currentSessionId: string,
+): Promise<ListedSession[]> {
+  const now = new Date();
+
+  const sessions = await prisma.session.findMany({
+    where: {
+      userId,
+
+      revokedAt: null,
+
+      idleExpiresAt: {
+        gt: now,
+      },
+
+      absoluteExpiresAt: {
+        gt: now,
+      },
+    },
+
+    orderBy: {
+      createdAt: 'desc',
+    },
+
+    select: {
+      id: true,
+
+      createdAt: true,
+      lastSeenAt: true,
+
+      idleExpiresAt: true,
+      absoluteExpiresAt: true,
+    },
+  });
+
+  return sessions.map((session) => ({
+    ...session,
+
+    current: session.id === currentSessionId,
+  }));
+}
