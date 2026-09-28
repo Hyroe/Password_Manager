@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
+import { useLocation, useNavigate } from 'react-router-dom';
+
+import { resolveRuntimeRedirect, type RuntimeState } from './lib/runtimeRouting';
+
 import {
   browserSupportsWebAuthn,
   startRegistration,
@@ -215,8 +219,9 @@ export default function App() {
 
   const [managedSessions, setManagedSessions] = useState<ManagedSession[]>([]);
 
-  type RuntimeState =
-    'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
+  const location = useLocation();
+
+  const navigate = useNavigate();
 
   const syncVaultItemsNow = useCallback(
     async (showStatus: boolean) => {
@@ -555,6 +560,18 @@ export default function App() {
       recoveryKitRef.current = null;
     };
   }, [disposeUnlockedVault]);
+
+  useEffect(() => {
+    const redirectTo = resolveRuntimeRedirect(runtimeState, location.pathname);
+
+    if (!redirectTo) {
+      return;
+    }
+
+    navigate(redirectTo, {
+      replace: true,
+    });
+  }, [runtimeState, location.pathname, navigate]);
 
   useEffect(() => {
     vaultItemsRef.current = vaultItems;
