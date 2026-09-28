@@ -6,6 +6,13 @@ import {
   type PublicKeyCredentialCreationOptionsJSON,
 } from '@simplewebauthn/browser';
 
+import {
+  listSessions,
+  revokeOtherSessions,
+  revokeSession,
+  type ManagedSession,
+} from './lib/sessionApi';
+
 import './App.css';
 
 import {
@@ -205,6 +212,8 @@ export default function App() {
   const deletedVaultItemsRef = useRef<EncryptedVaultItem[]>([]);
 
   const selectedItemIdRef = useRef<string | null>(null);
+
+  const [managedSessions, setManagedSessions] = useState<ManagedSession[]>([]);
 
   type RuntimeState =
     'CHECKING_SESSION' | 'SESSION_UNAVAILABLE' | 'SIGNED_OUT' | 'AUTHENTICATED_LOCKED' | 'UNLOCKED';
@@ -1786,6 +1795,8 @@ export default function App() {
 
     clearVaultUiState();
 
+    setManagedSessions([]);
+
     setRuntimeState('AUTHENTICATED_LOCKED');
 
     setLoading(true);
@@ -1887,6 +1898,138 @@ export default function App() {
 
     if (recoveryKitFileRef.current) {
       recoveryKitFileRef.current.value = '';
+    }
+  }
+
+  async function refreshManagedSessions(): Promise<void> {
+    const sessions = await listSessions();
+
+    setManagedSessions(sessions);
+  }
+
+  async function handleRevokeManagedSession(sessionId: string, current: boolean) {
+    resetMessages();
+
+    setLoading(true);
+
+    try {
+      await revokeSession(sessionId);
+
+      if (current) {
+        /*
+         * Revoking the current session destroys
+         * the authenticated security boundary.
+         */
+        disposeUnlockedVault();
+
+        discardRecoveryKit();
+
+        clearVaultUiState();
+
+        setManagedSessions([]);
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setMessage('Current session signed out.');
+
+        return;
+      }
+
+      await refreshManagedSessions();
+
+      setMessage('Session revoked.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+
+        discardRecoveryKit();
+
+        clearVaultUiState();
+
+        setManagedSessions([]);
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Session could not be revoked.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRevokeOtherSessions() {
+    resetMessages();
+
+    setLoading(true);
+
+    try {
+      await revokeOtherSessions();
+
+      await refreshManagedSessions();
+
+      setMessage('All other sessions have been signed out.');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+
+        discardRecoveryKit();
+
+        clearVaultUiState();
+
+        setManagedSessions([]);
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Other sessions could not be revoked.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLoadSessions() {
+    resetMessages();
+
+    setLoading(true);
+
+    try {
+      await refreshManagedSessions();
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+
+        discardRecoveryKit();
+
+        clearVaultUiState();
+
+        setManagedSessions([]);
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Sessions could not be loaded.');
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -2111,6 +2254,47 @@ export default function App() {
                 Recover Master Password
               </button>
             </>
+          )}
+
+          <hr />
+
+          <h3>Sessions</h3>
+
+          <p>Review active authenticated sessions for your account.</p>
+
+          <button type="button" disabled={loading} onClick={handleLoadSessions}>
+            Load sessions
+          </button>
+
+          {managedSessions.length > 1 && (
+            <button type="button" disabled={loading} onClick={handleRevokeOtherSessions}>
+              Sign out other sessions
+            </button>
+          )}
+
+          {managedSessions.length > 0 && (
+            <ul>
+              {managedSessions.map((session) => (
+                <li key={session.id}>
+                  <strong>{session.deviceLabel}</strong>
+                  {session.current && ' — Current session'}
+                  <br />
+                  Last active: {new Date(session.lastSeenAt).toLocaleString()}
+                  <br />
+                  Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
+                  <br />
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      void handleRevokeManagedSession(session.id, session.current);
+                    }}
+                  >
+                    {session.current ? 'Sign out this session' : 'Sign out'}
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
 
           <button type="button" disabled={loading} onClick={handleLogout}>
