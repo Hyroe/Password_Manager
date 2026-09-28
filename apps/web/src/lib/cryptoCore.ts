@@ -1,4 +1,5 @@
 import initCryptoWasm, {
+  change_master_password,
   create_account_bootstrap,
   crypto_argon2_iterations,
   crypto_argon2_memory_kib,
@@ -8,6 +9,7 @@ import initCryptoWasm, {
   recover_master_password,
   unlock_personal_vault,
   type AccountBootstrapResult,
+  type MasterPasswordChangeResult,
   type MasterPasswordRecoveryResult,
   type UnlockedVault,
 } from '@pm/crypto-core';
@@ -138,6 +140,38 @@ export async function recoverMasterPassword(
   );
 }
 
+interface ChangeMasterPasswordInput {
+  currentMasterPassword: string;
+  newMasterPassword: string;
+
+  accountSecret: Uint8Array;
+
+  currentKdfSalt: Uint8Array;
+
+  currentRootKeyEnvelope: Uint8Array;
+
+  rootKeyAad: Uint8Array;
+}
+
+export async function changeMasterPassword(
+  input: ChangeMasterPasswordInput,
+): Promise<MasterPasswordChangeResult> {
+  await initializeCryptoCore();
+
+  return change_master_password(
+    input.currentMasterPassword,
+    input.newMasterPassword,
+
+    input.accountSecret,
+
+    input.currentKdfSalt,
+
+    input.currentRootKeyEnvelope,
+
+    input.rootKeyAad,
+  );
+}
+
 export interface LoginItemDraft {
   name: string;
   username: string;
@@ -258,4 +292,9 @@ export async function decryptLoginItem(input: DecryptLoginItemInput): Promise<Lo
   }
 }
 
-export type { AccountBootstrapResult, MasterPasswordRecoveryResult, UnlockedVault };
+export type {
+  AccountBootstrapResult,
+  MasterPasswordChangeResult,
+  MasterPasswordRecoveryResult,
+  UnlockedVault,
+};

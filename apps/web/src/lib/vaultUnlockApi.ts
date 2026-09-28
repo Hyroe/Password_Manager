@@ -21,6 +21,8 @@ export interface VaultUnlockMaterial {
     keyVersion: number;
     envelopeVersion: number;
 
+    updatedAt: string;
+
     envelope: string;
     aad: string;
   };
