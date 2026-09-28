@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 
 import { sessionCookieClearOptions, sessionCookieName } from '../../config/session.js';
 
-import { listActiveSessions, revokeSession } from './sessionService.js';
+import { listActiveSessions, revokeSession, revokeUserSession } from './sessionService.js';
 
 export async function getMe(req: Request, res: Response) {
   if (!req.auth) {
@@ -71,4 +71,53 @@ export async function listSessions(req: Request, res: Response) {
       current: session.current,
     })),
   });
+}
+
+export async function revokeSessionRequest(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const sessionId = req.params.sessionId;
+
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (typeof sessionId !== 'string' || !uuidPattern.test(sessionId)) {
+    res.status(400).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+
+        message: 'Invalid session identifier.',
+      },
+    });
+
+    return;
+  }
+
+  /*
+   * Intentionally return the same successful
+   * response whether the session:
+   *
+   * - existed,
+   * - was already revoked,
+   * - or belongs to another account.
+   *
+   * This keeps DELETE idempotent and avoids
+   * exposing session existence across users.
+   */
+  await revokeUserSession(req.auth.userId, sessionId);
+
+  if (sessionId === req.auth.sessionId) {
+    res.clearCookie(sessionCookieName(), sessionCookieClearOptions());
+  }
+
+  res.status(204).end();
 }

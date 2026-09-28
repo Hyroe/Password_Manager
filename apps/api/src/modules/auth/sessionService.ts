@@ -147,3 +147,19 @@ export async function listActiveSessions(
     current: session.id === currentSessionId,
   }));
 }
+
+export async function revokeUserSession(userId: string, sessionId: string): Promise<boolean> {
+  const result = await prisma.session.updateMany({
+    where: {
+      id: sessionId,
+      userId,
+      revokedAt: null,
+    },
+
+    data: {
+      revokedAt: new Date(),
+    },
+  });
+
+  return result.count === 1;
+}

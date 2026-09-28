@@ -404,4 +404,162 @@ describe('authenticated sessions', () => {
       ['absoluteExpiresAt', 'createdAt', 'current', 'id', 'idleExpiresAt', 'lastSeenAt'].sort(),
     );
   });
+  it('revokes another session belonging to the authenticated user', async () => {
+    const { user, session: currentSession, token } = await createAuthenticatedSession();
+
+    const otherToken = generateSecurityToken();
+
+    const now = new Date();
+
+    const otherSession = await prisma.session.create({
+      data: {
+        userId: user.id,
+
+        tokenHash: Uint8Array.from(hashSecurityToken(otherToken)),
+
+        idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
+
+        absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+      },
+    });
+
+    const response = await request(app)
+      .delete(`/api/v1/sessions/${otherSession.id}`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(204);
+
+    const storedOtherSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: otherSession.id,
+      },
+    });
+
+    expect(storedOtherSession.revokedAt).not.toBeNull();
+
+    const storedCurrentSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: currentSession.id,
+      },
+    });
+
+    expect(storedCurrentSession.revokedAt).toBeNull();
+
+    const me = await request(app).get('/api/v1/me').set('Cookie', `pm_session=${token}`);
+
+    expect(me.status).toBe(200);
+  });
+  it('revokes the current session and clears its cookie', async () => {
+    const { session, token } = await createAuthenticatedSession();
+
+    const response = await request(app)
+      .delete(`/api/v1/sessions/${session.id}`)
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(204);
+
+    const storedSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: session.id,
+      },
+    });
+
+    expect(storedSession.revokedAt).not.toBeNull();
+
+    const setCookieHeader = response.headers['set-cookie'];
+
+    expect(setCookieHeader).toBeDefined();
+
+    const cookies = Array.isArray(setCookieHeader)
+      ? setCookieHeader.join(';')
+      : (setCookieHeader ?? '');
+
+    expect(cookies).toContain('pm_session=');
+
+    expect(cookies).toContain('Expires=Thu, 01 Jan 1970');
+
+    const meAfterRevocation = await request(app)
+      .get('/api/v1/me')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(meAfterRevocation.status).toBe(401);
+
+    expect(meAfterRevocation.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+  it('does not revoke another user session', async () => {
+    const { token } = await createAuthenticatedSession();
+
+    const otherUser = await prisma.user.create({
+      data: {
+        email: 'other-revoke@example.com',
+
+        normalizedEmail: 'other-revoke@example.com',
+
+        status: 'ACTIVE',
+
+        emailVerifiedAt: new Date(),
+
+        webauthnUserId: 'other-revoke-webauthn-user',
+      },
+    });
+
+    const otherToken = generateSecurityToken();
+
+    const now = new Date();
+
+    const otherSession = await prisma.session.create({
+      data: {
+        userId: otherUser.id,
+
+        tokenHash: Uint8Array.from(hashSecurityToken(otherToken)),
+
+        idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
+
+        absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+      },
+    });
+
+    const response = await request(app)
+      .delete(`/api/v1/sessions/${otherSession.id}`)
+      .set('Cookie', `pm_session=${token}`);
+
+    /*
+     * Same response as an unknown session:
+     * do not disclose cross-user existence.
+     */
+    expect(response.status).toBe(204);
+
+    const storedOtherSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: otherSession.id,
+      },
+    });
+
+    expect(storedOtherSession.revokedAt).toBeNull();
+
+    const otherMe = await request(app).get('/api/v1/me').set('Cookie', `pm_session=${otherToken}`);
+
+    expect(otherMe.status).toBe(200);
+  });
+  it('requires authentication to revoke a session', async () => {
+    const sessionId = '0199c531-a830-7000-8000-000000000001';
+
+    const response = await request(app).delete(`/api/v1/sessions/${sessionId}`);
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+
+  it('rejects an invalid session identifier', async () => {
+    const { token } = await createAuthenticatedSession();
+
+    const response = await request(app)
+      .delete('/api/v1/sessions/not-a-session-id')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(400);
+
+    expect(response.body.error.code).toBe('VALIDATION_ERROR');
+  });
 });
