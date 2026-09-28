@@ -2,6 +2,8 @@ import type { AuthenticationResponseJSON, WebAuthnCredential } from '@simpleweba
 
 import { SESSION_ABSOLUTE_TTL_MS, SESSION_IDLE_TTL_MS } from '../../config/session.js';
 
+import { normalizeSessionUserAgent } from './sessionMetadata.js';
+
 import { prisma } from '../../lib/prisma.js';
 
 import { generateSecurityToken, hashSecurityToken } from '../../lib/securityTokens.js';
@@ -36,6 +38,7 @@ export async function verifyPasskeyLogin(
   challengeId: string,
   response: AuthenticationResponseJSON,
   provider: PasskeyAuthenticationProvider,
+  userAgent?: string,
 ) {
   const now = new Date();
 
@@ -99,6 +102,8 @@ export async function verifyPasskeyLogin(
 
   const absoluteExpiresAt = new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS);
 
+  const normalizedUserAgent = normalizeSessionUserAgent(userAgent);
+
   await prisma.$transaction(async (tx) => {
     /*
      * Challenge is single-use.
@@ -138,6 +143,8 @@ export async function verifyPasskeyLogin(
         userId: passkey.user.id,
 
         tokenHash: sessionTokenHash,
+
+        userAgent: normalizedUserAgent,
 
         idleExpiresAt,
         absoluteExpiresAt,

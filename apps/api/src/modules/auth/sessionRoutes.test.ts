@@ -401,8 +401,18 @@ describe('authenticated sessions', () => {
     expect(serialized).not.toContain('token_hash');
 
     expect(Object.keys(response.body.sessions[0]).sort()).toEqual(
-      ['absoluteExpiresAt', 'createdAt', 'current', 'id', 'idleExpiresAt', 'lastSeenAt'].sort(),
+      [
+        'absoluteExpiresAt',
+        'createdAt',
+        'current',
+        'deviceLabel',
+        'id',
+        'idleExpiresAt',
+        'lastSeenAt',
+      ].sort(),
     );
+    expect(serialized).not.toContain('userAgent');
+    expect(serialized).not.toContain('user_agent');
   });
   it('revokes another session belonging to the authenticated user', async () => {
     const { user, session: currentSession, token } = await createAuthenticatedSession();

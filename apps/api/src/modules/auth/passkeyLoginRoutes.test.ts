@@ -230,4 +230,75 @@ describe('passkey login', () => {
 
     expect(await prisma.session.count()).toBe(0);
   });
+  it('stores bounded session User-Agent metadata after passkey authentication', async () => {
+    const { user, passkey } = await createActiveUser();
+
+    const options = await request(app).post('/api/v1/auth/passkeys/login/options').send({});
+
+    const userAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/153.0.0.0 Safari/537.36';
+
+    const response = await request(app)
+      .post('/api/v1/auth/passkeys/login/verify')
+      .set('User-Agent', userAgent)
+      .send({
+        challengeId: options.body.challengeId,
+
+        credential: {
+          id: passkey.credentialId,
+        },
+      });
+
+    expect(response.status).toBe(200);
+
+    const sessions = await prisma.session.findMany({
+      where: {
+        userId: user.id,
+      },
+    });
+
+    expect(sessions).toHaveLength(1);
+
+    expect(sessions[0]?.userAgent).toBe(userAgent);
+
+    /*
+     * Session metadata is persisted server-side
+     * but must not be exposed by the login response.
+     */
+    expect(response.body.userAgent).toBeUndefined();
+
+    expect(JSON.stringify(response.body)).not.toContain(userAgent);
+  });
+  it('truncates an oversized session User-Agent before persistence', async () => {
+    const { user, passkey } = await createActiveUser();
+
+    const options = await request(app).post('/api/v1/auth/passkeys/login/options').send({});
+
+    const oversizedUserAgent = `test-agent-${'x'.repeat(700)}`;
+
+    const response = await request(app)
+      .post('/api/v1/auth/passkeys/login/verify')
+      .set('User-Agent', oversizedUserAgent)
+      .send({
+        challengeId: options.body.challengeId,
+
+        credential: {
+          id: passkey.credentialId,
+        },
+      });
+
+    expect(response.status).toBe(200);
+
+    const session = await prisma.session.findFirstOrThrow({
+      where: {
+        userId: user.id,
+      },
+    });
+
+    expect(session.userAgent).not.toBeNull();
+
+    expect(session.userAgent).toHaveLength(512);
+
+    expect(session.userAgent).toBe(oversizedUserAgent.slice(0, 512));
+  });
 });

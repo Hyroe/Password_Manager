@@ -65,6 +65,8 @@ export async function listSessions(req: Request, res: Response) {
     sessions: sessions.map((session) => ({
       id: session.id,
 
+      deviceLabel: session.deviceLabel,
+
       createdAt: session.createdAt.toISOString(),
 
       lastSeenAt: session.lastSeenAt.toISOString(),

@@ -39,6 +39,8 @@ export function createPasskeyLoginController(provider: PasskeyAuthenticationProv
           parsed.data.credential as AuthenticationResponseJSON,
 
           provider,
+
+          req.get('user-agent'),
         );
 
         res.cookie(sessionCookieName(), result.sessionToken, sessionCookieOptions());

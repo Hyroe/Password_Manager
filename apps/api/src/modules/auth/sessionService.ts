@@ -4,6 +4,8 @@ import { prisma } from '../../lib/prisma.js';
 
 import { hashSecurityToken } from '../../lib/securityTokens.js';
 
+import { describeSessionDevice } from './sessionMetadata.js';
+
 export interface ActiveSession {
   sessionId: string;
   userId: string;
@@ -102,6 +104,8 @@ export interface ListedSession {
   idleExpiresAt: Date;
   absoluteExpiresAt: Date;
 
+  deviceLabel: string;
+
   current: boolean;
 }
 
@@ -133,6 +137,8 @@ export async function listActiveSessions(
     select: {
       id: true,
 
+      userAgent: true,
+
       createdAt: true,
       lastSeenAt: true,
 
@@ -142,7 +148,15 @@ export async function listActiveSessions(
   });
 
   return sessions.map((session) => ({
-    ...session,
+    id: session.id,
+
+    createdAt: session.createdAt,
+    lastSeenAt: session.lastSeenAt,
+
+    idleExpiresAt: session.idleExpiresAt,
+    absoluteExpiresAt: session.absoluteExpiresAt,
+
+    deviceLabel: describeSessionDevice(session.userAgent),
 
     current: session.id === currentSessionId,
   }));

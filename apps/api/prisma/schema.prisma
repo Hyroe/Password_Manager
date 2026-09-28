@@ -306,6 +306,8 @@ model Session {
 
   tokenHash Bytes @unique @map("token_hash")
 
+  userAgent String? @map("user_agent") @db.VarChar(512)
+
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
 
