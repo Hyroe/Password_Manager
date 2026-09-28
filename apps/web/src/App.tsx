@@ -28,6 +28,7 @@ import { bytesToBase64Url, wipeBytes } from './lib/encoding';
 import { downloadRecoveryKit, readRecoveryKit, type RecoveryKit } from './lib/recoveryKit';
 
 import { unlockVault } from './lib/vaultUnlock';
+import { recoverVaultMasterPassword } from './lib/vaultRecovery';
 
 import type { LoginItemPayload } from './lib/cryptoCore';
 
@@ -149,6 +150,10 @@ export default function App() {
   const recoveryKitFileRef = useRef<HTMLInputElement>(null);
 
   const unlockMasterPasswordRef = useRef<HTMLInputElement>(null);
+
+  const recoveryNewMasterPasswordRef = useRef<HTMLInputElement>(null);
+
+  const recoveryConfirmMasterPasswordRef = useRef<HTMLInputElement>(null);
 
   const unlockedVaultRef = useRef<UnlockedVault | null>(null);
 
@@ -397,11 +402,11 @@ export default function App() {
 
       /*
 
-       * Drop decrypted plaintext immediately
+        * Drop decrypted plaintext immediately
 
-       * when the selected item is deleted.
+        * when the selected item is deleted.
 
-       */
+        */
 
       if (selectedItemId === itemId) {
         selectedItemIdRef.current = null;
@@ -431,13 +436,13 @@ export default function App() {
       if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
         /*
 
-         * Another client changed the item.
+          * Another client changed the item.
 
-         * Do not allow this stale tab to keep
+          * Do not allow this stale tab to keep
 
-         * operating on the old plaintext.
+          * operating on the old plaintext.
 
-         */
+          */
 
         if (selectedItemId === itemId) {
           selectedItemIdRef.current = null;
@@ -1053,13 +1058,13 @@ export default function App() {
 
       /*
 
-       * Drop the Recovery Kit reference after
+        * Drop the Recovery Kit reference after
 
-       * successful unlock. It is no longer
+        * successful unlock. It is no longer
 
-       * needed in memory.
+        * needed in memory.
 
-       */
+        */
 
       discardRecoveryKit();
 
@@ -1097,6 +1102,107 @@ export default function App() {
     } finally {
       if (unlockMasterPasswordRef.current) {
         unlockMasterPasswordRef.current.value = '';
+      }
+
+      setLoading(false);
+    }
+  }
+
+  async function handleRecoverMasterPassword() {
+    const user = authenticatedUser;
+
+    const recoveryKit = recoveryKitRef.current;
+
+    const newMasterPassword = recoveryNewMasterPasswordRef.current?.value ?? '';
+
+    const confirmation = recoveryConfirmMasterPasswordRef.current?.value ?? '';
+
+    resetMessages();
+
+    if (!user || !recoveryKit) {
+      setError('Recovery Kit is required.');
+
+      return;
+    }
+
+    if (newMasterPassword.length < 12) {
+      setError('New Master Password must contain at least 12 characters.');
+
+      return;
+    }
+
+    if (newMasterPassword !== confirmation) {
+      setError('Master Password confirmation does not match.');
+
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await recoverVaultMasterPassword({
+        newMasterPassword,
+
+        recoveryKit,
+
+        authenticatedEmail: user.email,
+      });
+
+      /*
+       * Successful recovery revokes every
+       * authenticated session server-side,
+       * including the session used here.
+       *
+       * No vault keys should remain loaded.
+       */
+      disposeUnlockedVault();
+
+      clearVaultUiState();
+
+      discardRecoveryKit();
+
+      setAuthenticatedUser(null);
+
+      setRuntimeState('SIGNED_OUT');
+
+      setMessage(
+        'Master Password recovered successfully. Sign in again with your passkey, then unlock the vault with your new Master Password.',
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+
+        clearVaultUiState();
+
+        discardRecoveryKit();
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError(
+          'Your session has expired. Authenticate again before recovering your Master Password.',
+        );
+
+        return;
+      }
+
+      if (error instanceof ApiError && error.code === 'RECOVERY_CONFLICT') {
+        setError(
+          'The cryptographic state changed during recovery. Reload the Recovery Kit and try again.',
+        );
+
+        return;
+      }
+
+      setError(error instanceof Error ? error.message : 'Master Password recovery failed.');
+    } finally {
+      if (recoveryNewMasterPasswordRef.current) {
+        recoveryNewMasterPasswordRef.current.value = '';
+      }
+
+      if (recoveryConfirmMasterPasswordRef.current) {
+        recoveryConfirmMasterPasswordRef.current.value = '';
       }
 
       setLoading(false);
@@ -1163,11 +1269,11 @@ export default function App() {
 
       /*
 
-       * Remove plaintext from the form as
+        * Remove plaintext from the form as
 
-       * soon as persistence succeeds.
+        * soon as persistence succeeds.
 
-       */
+        */
 
       if (loginNameRef.current) {
         loginNameRef.current.value = '';
@@ -1215,11 +1321,11 @@ export default function App() {
     } finally {
       /*
 
-       * Always remove the password from
+        * Always remove the password from
 
-       * the DOM after an attempt.
+        * the DOM after an attempt.
 
-       */
+        */
 
       if (loginPasswordRef.current) {
         loginPasswordRef.current.value = '';
@@ -1246,11 +1352,11 @@ export default function App() {
 
     /*
 
-     * Drop any previously decrypted item
+      * Drop any previously decrypted item
 
-     * before loading another one.
+      * before loading another one.
 
-     */
+      */
 
     setSelectedLogin(null);
     selectedItemIdRef.current = null;
@@ -1324,17 +1430,17 @@ export default function App() {
 
     /*
 
-     * The revision displayed in this tab is
+      * The revision displayed in this tab is
 
-     * the revision this edit is based on.
+      * the revision this edit is based on.
 
-     *
+      *
 
-     * If another tab/client already changed
+      * If another tab/client already changed
 
-     * it, the backend will return 409.
+      * it, the backend will return 409.
 
-     */
+      */
 
     const itemMetadata = vaultItems.find((item) => item.id === itemId);
 
@@ -1389,15 +1495,15 @@ export default function App() {
 
       /*
 
-       * Read the newly persisted revision
+        * Read the newly persisted revision
 
-       * back from the server and decrypt it,
+        * back from the server and decrypt it,
 
-       * rather than trusting only our local
+        * rather than trusting only our local
 
-       * draft.
+        * draft.
 
-       */
+        */
 
       await refreshVaultItems();
 
@@ -1426,11 +1532,11 @@ export default function App() {
       if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
         /*
 
-         * Do not let the stale editor remain
+          * Do not let the stale editor remain
 
-         * open after a concurrency conflict.
+          * open after a concurrency conflict.
 
-         */
+          */
 
         selectedItemIdRef.current = null;
         setEditingLogin(false);
@@ -1457,11 +1563,11 @@ export default function App() {
     } finally {
       /*
 
-       * Password plaintext should not remain
+        * Password plaintext should not remain
 
-       * in an edit field after a save attempt.
+        * in an edit field after a save attempt.
 
-       */
+        */
 
       if (editPasswordRef.current) {
         editPasswordRef.current.value = '';
@@ -1538,11 +1644,11 @@ export default function App() {
   async function handleLogout() {
     /*
 
-     * Local keys are destroyed immediately,
+      * Local keys are destroyed immediately,
 
-     * even if the network request fails.
+      * even if the network request fails.
 
-     */
+      */
 
     disposeUnlockedVault();
 
@@ -1805,16 +1911,40 @@ export default function App() {
             <>
               <input
                 ref={unlockMasterPasswordRef}
-
                 type="password"
-
                 placeholder="Master Password"
-
                 autoComplete="current-password"
               />
 
               <button type="button" disabled={loading} onClick={handleUnlockVault}>
                 Unlock vault
+              </button>
+
+              <hr />
+
+              <h3>Recover Master Password</h3>
+
+              <p>
+                Use your Recovery Kit to replace a forgotten Master Password. Existing vault data
+                will remain encrypted with the same account keys.
+              </p>
+
+              <input
+                ref={recoveryNewMasterPasswordRef}
+                type="password"
+                placeholder="New Master Password"
+                autoComplete="new-password"
+              />
+
+              <input
+                ref={recoveryConfirmMasterPasswordRef}
+                type="password"
+                placeholder="Confirm new Master Password"
+                autoComplete="new-password"
+              />
+
+              <button type="button" disabled={loading} onClick={handleRecoverMasterPassword}>
+                Recover Master Password
               </button>
             </>
           )}
