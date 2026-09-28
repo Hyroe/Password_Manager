@@ -229,6 +229,12 @@ export default function App() {
 
   const isRegisterRoute = location.pathname === routes.register;
 
+  const isVaultRoute = location.pathname === routes.vault;
+
+  const isSecurityRoute = location.pathname === routes.security;
+
+  const isRecoveryRoute = location.pathname === routes.recovery;
+
   const syncVaultItemsNow = useCallback(
     async (showStatus: boolean) => {
       const vaultId = unlockedVaultIdRef.current;
@@ -2192,70 +2198,174 @@ export default function App() {
 
           <p>Your identity is authenticated, but your vault keys are not loaded.</p>
 
-          <label>
-            Recovery Kit
-            <input
-              ref={recoveryKitFileRef}
-
-              type="file"
-
-              accept=".json,application/json"
-
-              onChange={(event) => {
-                void handleRecoveryKitFile(event.target.files?.[0]);
-              }}
-            />
-          </label>
-
-          {recoveryKitLoaded && (
+          {isVaultRoute && (
             <>
-              <input
-                ref={unlockMasterPasswordRef}
-                type="password"
-                placeholder="Master Password"
-                autoComplete="current-password"
-              />
+              <label>
+                Recovery Kit
+                <input
+                  ref={recoveryKitFileRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => {
+                    void handleRecoveryKitFile(event.target.files?.[0]);
+                  }}
+                />
+              </label>
 
-              <button type="button" disabled={loading} onClick={handleUnlockVault}>
-                Unlock vault
-              </button>
+              {recoveryKitLoaded && (
+                <>
+                  <input
+                    ref={unlockMasterPasswordRef}
+                    type="password"
+                    placeholder="Master Password"
+                    autoComplete="current-password"
+                  />
 
-              <hr />
-
-              <h3>Change Master Password</h3>
-
-              <p>
-                Replace your current Master Password without changing your Recovery Kit or
-                re-encrypting existing vault items.
-              </p>
-
-              <input
-                ref={changeCurrentMasterPasswordRef}
-                type="password"
-                placeholder="Current Master Password"
-                autoComplete="current-password"
-              />
-
-              <input
-                ref={changeNewMasterPasswordRef}
-                type="password"
-                placeholder="New Master Password"
-                autoComplete="new-password"
-              />
-
-              <input
-                ref={changeConfirmMasterPasswordRef}
-                type="password"
-                placeholder="Confirm new Master Password"
-                autoComplete="new-password"
-              />
-
-              <button type="button" disabled={loading} onClick={handleChangeMasterPassword}>
-                Change Master Password
-              </button>
+                  <button type="button" disabled={loading} onClick={handleUnlockVault}>
+                    Unlock vault
+                  </button>
+                </>
+              )}
 
               <hr />
 
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.security);
+                }}
+              >
+                Security settings
+              </button>
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.recovery);
+                }}
+              >
+                Recover Master Password
+              </button>
+            </>
+          )}
+
+          {isSecurityRoute && (
+            <>
+              <h3>Security</h3>
+
+              <label>
+                Recovery Kit
+                <input
+                  ref={recoveryKitFileRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => {
+                    void handleRecoveryKitFile(event.target.files?.[0]);
+                  }}
+                />
+              </label>
+
+              {recoveryKitLoaded && (
+                <>
+                  <hr />
+
+                  <h3>Change Master Password</h3>
+
+                  <p>
+                    Replace your current Master Password without changing your Recovery Kit or
+                    re-encrypting existing vault items.
+                  </p>
+
+                  <input
+                    ref={changeCurrentMasterPasswordRef}
+                    type="password"
+                    placeholder="Current Master Password"
+                    autoComplete="current-password"
+                  />
+
+                  <input
+                    ref={changeNewMasterPasswordRef}
+                    type="password"
+                    placeholder="New Master Password"
+                    autoComplete="new-password"
+                  />
+
+                  <input
+                    ref={changeConfirmMasterPasswordRef}
+                    type="password"
+                    placeholder="Confirm new Master Password"
+                    autoComplete="new-password"
+                  />
+
+                  <button type="button" disabled={loading} onClick={handleChangeMasterPassword}>
+                    Change Master Password
+                  </button>
+                </>
+              )}
+
+              <hr />
+
+              <h3>Sessions</h3>
+
+              <p>Review active authenticated sessions for your account.</p>
+
+              <button type="button" disabled={loading} onClick={handleLoadSessions}>
+                Load sessions
+              </button>
+
+              {managedSessions.length > 1 && (
+                <button type="button" disabled={loading} onClick={handleRevokeOtherSessions}>
+                  Sign out other sessions
+                </button>
+              )}
+
+              {managedSessions.length > 0 && (
+                <ul>
+                  {managedSessions.map((session) => (
+                    <li key={session.id}>
+                      <strong>{session.deviceLabel}</strong>
+                      {session.current && ' — Current session'}
+                      <br />
+                      Last active: {new Date(session.lastSeenAt).toLocaleString()}
+                      <br />
+                      Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
+                      <br />
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          void handleRevokeManagedSession(session.id, session.current);
+                        }}
+                      >
+                        {session.current ? 'Sign out this session' : 'Sign out'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <hr />
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.vault);
+                }}
+              >
+                Back to vault
+              </button>
+
+              <button type="button" disabled={loading} onClick={handleLogout}>
+                Sign out
+              </button>
+            </>
+          )}
+
+          {isRecoveryRoute && (
+            <>
               <h3>Recover Master Password</h3>
 
               <p>
@@ -2263,70 +2373,53 @@ export default function App() {
                 will remain encrypted with the same account keys.
               </p>
 
-              <input
-                ref={recoveryNewMasterPasswordRef}
-                type="password"
-                placeholder="New Master Password"
-                autoComplete="new-password"
-              />
+              <label>
+                Recovery Kit
+                <input
+                  ref={recoveryKitFileRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => {
+                    void handleRecoveryKitFile(event.target.files?.[0]);
+                  }}
+                />
+              </label>
 
-              <input
-                ref={recoveryConfirmMasterPasswordRef}
-                type="password"
-                placeholder="Confirm new Master Password"
-                autoComplete="new-password"
-              />
+              {recoveryKitLoaded && (
+                <>
+                  <input
+                    ref={recoveryNewMasterPasswordRef}
+                    type="password"
+                    placeholder="New Master Password"
+                    autoComplete="new-password"
+                  />
 
-              <button type="button" disabled={loading} onClick={handleRecoverMasterPassword}>
-                Recover Master Password
+                  <input
+                    ref={recoveryConfirmMasterPasswordRef}
+                    type="password"
+                    placeholder="Confirm new Master Password"
+                    autoComplete="new-password"
+                  />
+
+                  <button type="button" disabled={loading} onClick={handleRecoverMasterPassword}>
+                    Recover Master Password
+                  </button>
+                </>
+              )}
+
+              <hr />
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.vault);
+                }}
+              >
+                Back to vault
               </button>
             </>
           )}
-
-          <hr />
-
-          <h3>Sessions</h3>
-
-          <p>Review active authenticated sessions for your account.</p>
-
-          <button type="button" disabled={loading} onClick={handleLoadSessions}>
-            Load sessions
-          </button>
-
-          {managedSessions.length > 1 && (
-            <button type="button" disabled={loading} onClick={handleRevokeOtherSessions}>
-              Sign out other sessions
-            </button>
-          )}
-
-          {managedSessions.length > 0 && (
-            <ul>
-              {managedSessions.map((session) => (
-                <li key={session.id}>
-                  <strong>{session.deviceLabel}</strong>
-                  {session.current && ' — Current session'}
-                  <br />
-                  Last active: {new Date(session.lastSeenAt).toLocaleString()}
-                  <br />
-                  Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
-                  <br />
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      void handleRevokeManagedSession(session.id, session.current);
-                    }}
-                  >
-                    {session.current ? 'Sign out this session' : 'Sign out'}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <button type="button" disabled={loading} onClick={handleLogout}>
-            Sign out
-          </button>
         </section>
       )}
 
