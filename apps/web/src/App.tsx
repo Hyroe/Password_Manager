@@ -199,6 +199,12 @@ export default function App() {
 
   const [editingLogin, setEditingLogin] = useState(false);
 
+  const [newLoginPasswordVisible, setNewLoginPasswordVisible] = useState(false);
+
+  const [selectedLoginPasswordVisible, setSelectedLoginPasswordVisible] = useState(false);
+
+  const [editLoginPasswordVisible, setEditLoginPasswordVisible] = useState(false);
+
   const editNameRef = useRef<HTMLInputElement>(null);
 
   const editUsernameRef = useRef<HTMLInputElement>(null);
@@ -334,6 +340,9 @@ export default function App() {
     setSelectedItemId(null);
     setEditingLogin(false);
     setDeletedVaultItems([]);
+    setNewLoginPasswordVisible(false);
+    setSelectedLoginPasswordVisible(false);
+    setEditLoginPasswordVisible(false);
 
     if (loginNameRef.current) {
       loginNameRef.current.value = '';
@@ -1479,6 +1488,7 @@ export default function App() {
       setSelectedLogin(null);
       selectedItemIdRef.current = null;
       setSelectedItemId(null);
+      setNewLoginPasswordVisible(false);
 
       await refreshVaultItems();
 
@@ -1510,6 +1520,7 @@ export default function App() {
 
       if (loginPasswordRef.current) {
         loginPasswordRef.current.value = '';
+        setNewLoginPasswordVisible(false);
       }
 
       setLoading(false);
@@ -1553,9 +1564,12 @@ export default function App() {
       selectedItemIdRef.current = null;
 
       setEditingLogin(false);
+
+      setSelectedLoginPasswordVisible(false);
+      setEditLoginPasswordVisible(false);
+
       setSelectedLogin(null);
       setSelectedItemId(null);
-
       try {
         const login = await loadAndDecryptLoginItem(vault, vaultId, itemId);
 
@@ -1616,6 +1630,10 @@ export default function App() {
         selectedItemIdRef.current = null;
 
         setEditingLogin(false);
+
+        setSelectedLoginPasswordVisible(false);
+        setEditLoginPasswordVisible(false);
+
         setSelectedLogin(null);
         setSelectedItemId(null);
 
@@ -1651,6 +1669,7 @@ export default function App() {
       return;
     }
 
+    setEditLoginPasswordVisible(false);
     setEditingLogin(true);
 
     resetMessages();
@@ -1658,6 +1677,7 @@ export default function App() {
 
   function handleCancelEditingLogin() {
     setEditingLogin(false);
+    setEditLoginPasswordVisible(false);
 
     if (editPasswordRef.current) {
       editPasswordRef.current.value = '';
@@ -1761,6 +1781,8 @@ export default function App() {
       setSelectedLogin(refreshedLogin);
 
       setEditingLogin(false);
+      setEditLoginPasswordVisible(false);
+      setSelectedLoginPasswordVisible(false);
 
       setMessage(`Login updated to revision ${updated.revisionNumber}.`);
     } catch (error) {
@@ -2554,10 +2576,18 @@ export default function App() {
                   Password
                   <input
                     ref={loginPasswordRef}
-                    type="password"
+                    type={newLoginPasswordVisible ? 'text' : 'password'}
                     autoComplete="off"
                     placeholder="Password"
                   />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewLoginPasswordVisible((visible) => !visible);
+                    }}
+                  >
+                    {newLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                  </button>
                 </label>
               </div>
 
@@ -2698,8 +2728,22 @@ export default function App() {
                       </p>
 
                       <p>
-                        <strong>Password:</strong> <code>{selectedLogin.password}</code>
+                        <strong>Password:</strong>{' '}
+                        {selectedLoginPasswordVisible ? (
+                          <code>{selectedLogin.password}</code>
+                        ) : (
+                          <code>••••••••••••</code>
+                        )}
                       </p>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedLoginPasswordVisible((visible) => !visible);
+                        }}
+                      >
+                        {selectedLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                      </button>
 
                       <p>
                         <strong>URLs:</strong>
@@ -2770,10 +2814,18 @@ export default function App() {
                           Password
                           <input
                             ref={editPasswordRef}
-                            type="password"
+                            type={editLoginPasswordVisible ? 'text' : 'password'}
                             autoComplete="off"
                             defaultValue={selectedLogin.password}
                           />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditLoginPasswordVisible((visible) => !visible);
+                            }}
+                          >
+                            {editLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                          </button>
                         </label>
                       </div>
 
