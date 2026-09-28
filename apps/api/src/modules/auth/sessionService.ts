@@ -163,3 +163,26 @@ export async function revokeUserSession(userId: string, sessionId: string): Prom
 
   return result.count === 1;
 }
+
+export async function revokeOtherSessions(
+  userId: string,
+  currentSessionId: string,
+): Promise<number> {
+  const result = await prisma.session.updateMany({
+    where: {
+      userId,
+
+      id: {
+        not: currentSessionId,
+      },
+
+      revokedAt: null,
+    },
+
+    data: {
+      revokedAt: new Date(),
+    },
+  });
+
+  return result.count;
+}

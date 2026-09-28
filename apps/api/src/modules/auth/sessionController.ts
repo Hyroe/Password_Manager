@@ -2,7 +2,12 @@ import type { Request, Response } from 'express';
 
 import { sessionCookieClearOptions, sessionCookieName } from '../../config/session.js';
 
-import { listActiveSessions, revokeSession, revokeUserSession } from './sessionService.js';
+import {
+  listActiveSessions,
+  revokeOtherSessions,
+  revokeSession,
+  revokeUserSession,
+} from './sessionService.js';
 
 export async function getMe(req: Request, res: Response) {
   if (!req.auth) {
@@ -119,5 +124,30 @@ export async function revokeSessionRequest(req: Request, res: Response) {
     res.clearCookie(sessionCookieName(), sessionCookieClearOptions());
   }
 
+  res.status(204).end();
+}
+
+export async function revokeOtherSessionsRequest(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  await revokeOtherSessions(req.auth.userId, req.auth.sessionId);
+
+  /*
+   * The current session intentionally survives.
+   *
+   * Therefore:
+   * - do not revoke it
+   * - do not clear the current browser cookie
+   */
   res.status(204).end();
 }

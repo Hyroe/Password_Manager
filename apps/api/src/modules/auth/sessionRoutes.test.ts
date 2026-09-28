@@ -562,4 +562,193 @@ describe('authenticated sessions', () => {
 
     expect(response.body.error.code).toBe('VALIDATION_ERROR');
   });
+  it('revokes every other session while preserving the current session', async () => {
+    const { user, session: currentSession, token } = await createAuthenticatedSession();
+
+    const now = new Date();
+
+    const secondToken = generateSecurityToken();
+
+    const secondSession = await prisma.session.create({
+      data: {
+        userId: user.id,
+
+        tokenHash: Uint8Array.from(hashSecurityToken(secondToken)),
+
+        idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
+
+        absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+      },
+    });
+
+    const thirdToken = generateSecurityToken();
+
+    const thirdSession = await prisma.session.create({
+      data: {
+        userId: user.id,
+
+        tokenHash: Uint8Array.from(hashSecurityToken(thirdToken)),
+
+        idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
+
+        absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/sessions/revoke-others')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(204);
+
+    const storedCurrentSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: currentSession.id,
+      },
+    });
+
+    const storedSecondSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: secondSession.id,
+      },
+    });
+
+    const storedThirdSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: thirdSession.id,
+      },
+    });
+
+    expect(storedCurrentSession.revokedAt).toBeNull();
+
+    expect(storedSecondSession.revokedAt).not.toBeNull();
+
+    expect(storedThirdSession.revokedAt).not.toBeNull();
+
+    /*
+     * Current session remains authenticated.
+     */
+    const currentMe = await request(app).get('/api/v1/me').set('Cookie', `pm_session=${token}`);
+
+    expect(currentMe.status).toBe(200);
+
+    /*
+     * Other sessions are immediately unusable.
+     */
+    const secondMe = await request(app)
+      .get('/api/v1/me')
+      .set('Cookie', `pm_session=${secondToken}`);
+
+    expect(secondMe.status).toBe(401);
+
+    const thirdMe = await request(app).get('/api/v1/me').set('Cookie', `pm_session=${thirdToken}`);
+
+    expect(thirdMe.status).toBe(401);
+  });
+  it('does not revoke sessions belonging to another user when signing out other sessions', async () => {
+    const { token } = await createAuthenticatedSession();
+
+    const otherUser = await prisma.user.create({
+      data: {
+        email: 'other-revoke-all@example.com',
+
+        normalizedEmail: 'other-revoke-all@example.com',
+
+        status: 'ACTIVE',
+
+        emailVerifiedAt: new Date(),
+
+        webauthnUserId: 'other-revoke-all-webauthn-user',
+      },
+    });
+
+    const otherToken = generateSecurityToken();
+
+    const now = new Date();
+
+    const otherSession = await prisma.session.create({
+      data: {
+        userId: otherUser.id,
+
+        tokenHash: Uint8Array.from(hashSecurityToken(otherToken)),
+
+        idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
+
+        absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/sessions/revoke-others')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(204);
+
+    const storedOtherSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: otherSession.id,
+      },
+    });
+
+    expect(storedOtherSession.revokedAt).toBeNull();
+
+    const otherMe = await request(app).get('/api/v1/me').set('Cookie', `pm_session=${otherToken}`);
+
+    expect(otherMe.status).toBe(200);
+  });
+  it('does not clear the current cookie when signing out other sessions', async () => {
+    const { user, token } = await createAuthenticatedSession();
+
+    const otherToken = generateSecurityToken();
+
+    const now = new Date();
+
+    await prisma.session.create({
+      data: {
+        userId: user.id,
+
+        tokenHash: Uint8Array.from(hashSecurityToken(otherToken)),
+
+        idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
+
+        absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+      },
+    });
+
+    const response = await request(app)
+      .post('/api/v1/sessions/revoke-others')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(204);
+
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+  it('is idempotent when there are no other sessions to revoke', async () => {
+    const { session, token } = await createAuthenticatedSession();
+
+    const response = await request(app)
+      .post('/api/v1/sessions/revoke-others')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(204);
+
+    const storedSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: session.id,
+      },
+    });
+
+    expect(storedSession.revokedAt).toBeNull();
+
+    const me = await request(app).get('/api/v1/me').set('Cookie', `pm_session=${token}`);
+
+    expect(me.status).toBe(200);
+  });
+  it('requires authentication to sign out other sessions', async () => {
+    const response = await request(app).post('/api/v1/sessions/revoke-others');
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+  });
 });
