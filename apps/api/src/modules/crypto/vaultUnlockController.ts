@@ -4,7 +4,10 @@ import { sessionCookieClearOptions, sessionCookieName } from '../../config/sessi
 
 import { completeMasterPasswordRecoverySchema } from './vaultRecoverySchemas.js';
 
+import { changeMasterPasswordSchema } from './vaultMasterPasswordSchemas.js';
+
 import {
+  changeMasterPassword,
   completeMasterPasswordRecovery,
   getMasterPasswordRecoveryMaterial,
   getVaultUnlockMaterial,
@@ -139,6 +142,92 @@ export async function completeMasterPasswordRecoveryRequest(req: Request, res: R
           code: 'RECOVERY_CONFLICT',
 
           message: 'The account cryptographic state changed during recovery.',
+        },
+      });
+
+      return;
+    }
+
+    if (error instanceof Error && error.message === 'CRYPTO_PROTOCOL_UNSUPPORTED') {
+      res.status(409).json({
+        error: {
+          code: 'CRYPTO_PROTOCOL_UNSUPPORTED',
+
+          message: 'This account uses an unsupported cryptographic protocol.',
+        },
+      });
+
+      return;
+    }
+
+    if (error instanceof Error && error.message === 'CRYPTO_STATE_INVALID') {
+      res.status(409).json({
+        error: {
+          code: 'CRYPTO_STATE_INVALID',
+
+          message: 'The account cryptographic state is incomplete.',
+        },
+      });
+
+      return;
+    }
+
+    throw error;
+  }
+}
+
+export async function changeMasterPasswordRequest(req: Request, res: Response) {
+  if (!req.auth) {
+    res.status(401).json({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+
+        message: 'Authentication is required.',
+      },
+    });
+
+    return;
+  }
+
+  const result = changeMasterPasswordSchema.safeParse(req.body);
+
+  if (!result.success) {
+    res.status(400).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+
+        message: 'Invalid Master Password change payload.',
+      },
+    });
+
+    return;
+  }
+
+  try {
+    await changeMasterPassword(req.auth.userId, result.data);
+
+    res.clearCookie(sessionCookieName(), sessionCookieClearOptions());
+
+    res.status(204).end();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_CRYPTO_MATERIAL') {
+      res.status(400).json({
+        error: {
+          code: 'INVALID_CRYPTO_MATERIAL',
+
+          message: 'Invalid encrypted Master Password change material.',
+        },
+      });
+
+      return;
+    }
+
+    if (error instanceof Error && error.message === 'MASTER_PASSWORD_CHANGE_CONFLICT') {
+      res.status(409).json({
+        error: {
+          code: 'MASTER_PASSWORD_CHANGE_CONFLICT',
+
+          message: 'The account cryptographic state changed during the Master Password update.',
         },
       });
 

@@ -163,16 +163,21 @@ describe('vault unlock bootstrap', () => {
 
     expect(response.body.kdf).toEqual({
       algorithm: 'ARGON2ID',
+
       profileVersion: 1,
+
       memoryKib: 19 * 1024,
+
       iterations: 2,
+
       parallelism: 1,
 
       salt: Buffer.alloc(16, 0x11).toString('base64url'),
     });
 
-    expect(response.body.rootKey).toEqual({
+    expect(response.body.rootKey).toMatchObject({
       keyVersion: 1,
+
       envelopeVersion: 1,
 
       envelope: Buffer.alloc(61, 0x22).toString('base64url'),
@@ -180,12 +185,19 @@ describe('vault unlock bootstrap', () => {
       aad: `pm:v1:ark:crypto-profile:${cryptoProfileId}:key-version:1`,
     });
 
+    expect(response.body.rootKey.updatedAt).toBeTypeOf('string');
+
+    expect(Number.isNaN(Date.parse(response.body.rootKey.updatedAt))).toBe(false);
+
     expect(response.body.vault).toEqual({
       id: vaultId,
+
       kind: 'PERSONAL',
 
       keyVersion: 1,
+
       rootKeyVersion: 1,
+
       envelopeVersion: 1,
 
       envelope: Buffer.alloc(61, 0x33).toString('base64url'),
@@ -912,6 +924,445 @@ describe('vault unlock bootstrap', () => {
      * A failed stale recovery is not a successful
      * security transition, so it must not revoke
      * the authenticated session.
+     */
+    const sessions = await prisma.session.findMany({
+      where: {
+        userId: user.id,
+      },
+    });
+
+    expect(sessions.every((session) => session.revokedAt === null)).toBe(true);
+  });
+  it('changes the Master Password envelope without rotating ARK-dependent envelopes', async () => {
+    const { user, token, cryptoProfileId, vaultId } = await createUnlockableAccount();
+
+    const unlockContext = await request(app)
+      .get('/api/v1/crypto/unlock')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(unlockContext.status).toBe(200);
+
+    expect(unlockContext.body.rootKey.updatedAt).toBeTypeOf('string');
+
+    const profileBefore = await prisma.userCryptoProfile.findUniqueOrThrow({
+      where: {
+        id: cryptoProfileId,
+      },
+    });
+
+    const rootBefore = await prisma.rootKeyEnvelope.findFirstOrThrow({
+      where: {
+        cryptoProfileId,
+
+        keyVersion: unlockContext.body.rootKey.keyVersion,
+      },
+    });
+
+    const recoveryBefore = await prisma.recoveryEnvelope.findFirstOrThrow({
+      where: {
+        cryptoProfileId,
+      },
+    });
+
+    const vaultBefore = await prisma.vaultKeyEnvelope.findFirstOrThrow({
+      where: {
+        vaultId,
+      },
+    });
+
+    /*
+     * Add another authenticated session to prove
+     * password change revokes all sessions rather
+     * than only the current browser.
+     */
+    const secondToken = generateSecurityToken();
+
+    const now = new Date();
+
+    await prisma.session.create({
+      data: {
+        userId: user.id,
+
+        tokenHash: Uint8Array.from(hashSecurityToken(secondToken)),
+
+        idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
+
+        absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+      },
+    });
+
+    const newKdfSalt = Buffer.alloc(16, 0x77);
+
+    const newRootEnvelope = Buffer.alloc(61, 0x88);
+
+    newRootEnvelope[0] = 1;
+
+    const response = await request(app)
+      .post('/api/v1/crypto/master-password/change')
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        protocolVersion: 1,
+
+        kdf: {
+          algorithm: 'ARGON2ID',
+
+          profileVersion: 1,
+
+          memoryKib: 19 * 1024,
+
+          iterations: 2,
+
+          parallelism: 1,
+
+          salt: newKdfSalt.toString('base64url'),
+        },
+
+        rootKey: {
+          keyVersion: unlockContext.body.rootKey.keyVersion,
+
+          envelopeVersion: 1,
+
+          expectedUpdatedAt: unlockContext.body.rootKey.updatedAt,
+
+          envelope: newRootEnvelope.toString('base64url'),
+        },
+      });
+
+    expect(response.status).toBe(204);
+
+    const profileAfter = await prisma.userCryptoProfile.findUniqueOrThrow({
+      where: {
+        id: cryptoProfileId,
+      },
+    });
+
+    expect(Array.from(profileAfter.kdfSalt)).toEqual(Array.from(newKdfSalt));
+
+    expect(Array.from(profileAfter.kdfSalt)).not.toEqual(Array.from(profileBefore.kdfSalt));
+
+    const rootAfter = await prisma.rootKeyEnvelope.findUniqueOrThrow({
+      where: {
+        id: rootBefore.id,
+      },
+    });
+
+    expect(rootAfter.id).toBe(rootBefore.id);
+
+    expect(rootAfter.keyVersion).toBe(rootBefore.keyVersion);
+
+    expect(Array.from(rootAfter.encryptedKey)).toEqual(Array.from(newRootEnvelope));
+
+    expect(rootAfter.updatedAt.getTime()).toBeGreaterThan(rootBefore.updatedAt.getTime());
+
+    /*
+     * Recovery path remains intact.
+     */
+    const recoveryAfter = await prisma.recoveryEnvelope.findUniqueOrThrow({
+      where: {
+        id: recoveryBefore.id,
+      },
+    });
+
+    expect(recoveryAfter.recoveryVersion).toBe(recoveryBefore.recoveryVersion);
+
+    expect(recoveryAfter.rootKeyVersion).toBe(recoveryBefore.rootKeyVersion);
+
+    expect(Array.from(recoveryAfter.encryptedKey)).toEqual(Array.from(recoveryBefore.encryptedKey));
+
+    /*
+     * PVK envelope remains intact.
+     */
+    const vaultAfter = await prisma.vaultKeyEnvelope.findUniqueOrThrow({
+      where: {
+        id: vaultBefore.id,
+      },
+    });
+
+    expect(vaultAfter.vaultKeyVersion).toBe(vaultBefore.vaultKeyVersion);
+
+    expect(vaultAfter.rootKeyVersion).toBe(vaultBefore.rootKeyVersion);
+
+    expect(Array.from(vaultAfter.encryptedKey)).toEqual(Array.from(vaultBefore.encryptedKey));
+
+    /*
+     * Every session must be revoked.
+     */
+    const sessions = await prisma.session.findMany({
+      where: {
+        userId: user.id,
+      },
+    });
+
+    expect(sessions).toHaveLength(2);
+
+    expect(sessions.every((session) => session.revokedAt !== null)).toBe(true);
+
+    /*
+     * Current browser cookie is explicitly removed.
+     */
+    const setCookieHeader = response.headers['set-cookie'];
+
+    expect(setCookieHeader).toBeDefined();
+
+    const cookies = Array.isArray(setCookieHeader)
+      ? setCookieHeader.join(';')
+      : (setCookieHeader ?? '');
+
+    expect(cookies).toContain('pm_session=');
+
+    expect(cookies).toContain('Expires=Thu, 01 Jan 1970');
+
+    /*
+     * Neither old authenticated session remains usable.
+     */
+    const firstSessionCheck = await request(app)
+      .get('/api/v1/me')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(firstSessionCheck.status).toBe(401);
+
+    const secondSessionCheck = await request(app)
+      .get('/api/v1/me')
+      .set('Cookie', `pm_session=${secondToken}`);
+
+    expect(secondSessionCheck.status).toBe(401);
+  });
+  it('requires authentication to change the Master Password', async () => {
+    const rootEnvelope = Buffer.alloc(61, 0x88);
+
+    rootEnvelope[0] = 1;
+
+    const response = await request(app)
+      .post('/api/v1/crypto/master-password/change')
+      .send({
+        protocolVersion: 1,
+
+        kdf: {
+          algorithm: 'ARGON2ID',
+
+          profileVersion: 1,
+
+          memoryKib: 19 * 1024,
+
+          iterations: 2,
+
+          parallelism: 1,
+
+          salt: Buffer.alloc(16, 0x77).toString('base64url'),
+        },
+
+        rootKey: {
+          keyVersion: 1,
+
+          envelopeVersion: 1,
+
+          expectedUpdatedAt: new Date().toISOString(),
+
+          envelope: rootEnvelope.toString('base64url'),
+        },
+      });
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+  it('rejects Master Password change material with an invalid embedded envelope version', async () => {
+    const { user, token, cryptoProfileId } = await createUnlockableAccount();
+
+    const unlockContext = await request(app)
+      .get('/api/v1/crypto/unlock')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(unlockContext.status).toBe(200);
+
+    const profileBefore = await prisma.userCryptoProfile.findUniqueOrThrow({
+      where: {
+        id: cryptoProfileId,
+      },
+    });
+
+    const rootBefore = await prisma.rootKeyEnvelope.findFirstOrThrow({
+      where: {
+        cryptoProfileId,
+
+        keyVersion: unlockContext.body.rootKey.keyVersion,
+      },
+    });
+
+    const invalidEnvelope = Buffer.alloc(61, 0x88);
+
+    /*
+     * Metadata claims version 1,
+     * serialized envelope claims version 2.
+     */
+    invalidEnvelope[0] = 2;
+
+    const response = await request(app)
+      .post('/api/v1/crypto/master-password/change')
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        protocolVersion: 1,
+
+        kdf: {
+          algorithm: 'ARGON2ID',
+
+          profileVersion: 1,
+
+          memoryKib: 19 * 1024,
+
+          iterations: 2,
+
+          parallelism: 1,
+
+          salt: Buffer.alloc(16, 0x77).toString('base64url'),
+        },
+
+        rootKey: {
+          keyVersion: unlockContext.body.rootKey.keyVersion,
+
+          envelopeVersion: 1,
+
+          expectedUpdatedAt: unlockContext.body.rootKey.updatedAt,
+
+          envelope: invalidEnvelope.toString('base64url'),
+        },
+      });
+
+    expect(response.status).toBe(400);
+
+    expect(response.body.error.code).toBe('INVALID_CRYPTO_MATERIAL');
+
+    const profileAfter = await prisma.userCryptoProfile.findUniqueOrThrow({
+      where: {
+        id: cryptoProfileId,
+      },
+    });
+
+    expect(Array.from(profileAfter.kdfSalt)).toEqual(Array.from(profileBefore.kdfSalt));
+
+    const rootAfter = await prisma.rootKeyEnvelope.findUniqueOrThrow({
+      where: {
+        id: rootBefore.id,
+      },
+    });
+
+    expect(Array.from(rootAfter.encryptedKey)).toEqual(Array.from(rootBefore.encryptedKey));
+
+    const sessions = await prisma.session.findMany({
+      where: {
+        userId: user.id,
+      },
+    });
+
+    expect(sessions.every((session) => session.revokedAt === null)).toBe(true);
+  });
+  it('rejects a stale Master Password change context', async () => {
+    const { user, token, cryptoProfileId } = await createUnlockableAccount();
+
+    const unlockContext = await request(app)
+      .get('/api/v1/crypto/unlock')
+      .set('Cookie', `pm_session=${token}`);
+
+    expect(unlockContext.status).toBe(200);
+
+    const staleUpdatedAt = unlockContext.body.rootKey.updatedAt;
+
+    expect(staleUpdatedAt).toBeTypeOf('string');
+
+    const profileBefore = await prisma.userCryptoProfile.findUniqueOrThrow({
+      where: {
+        id: cryptoProfileId,
+      },
+    });
+
+    const currentRoot = await prisma.rootKeyEnvelope.findFirstOrThrow({
+      where: {
+        cryptoProfileId,
+
+        keyVersion: unlockContext.body.rootKey.keyVersion,
+      },
+    });
+
+    /*
+     * Simulate another password change or
+     * recovery winning after this client
+     * loaded /crypto/unlock.
+     */
+    const replacementEnvelope = Buffer.alloc(61, 0x66);
+
+    replacementEnvelope[0] = 1;
+
+    const replacementUpdatedAt = new Date(new Date(staleUpdatedAt).getTime() + 1000);
+
+    await prisma.rootKeyEnvelope.update({
+      where: {
+        id: currentRoot.id,
+      },
+
+      data: {
+        encryptedKey: replacementEnvelope,
+
+        updatedAt: replacementUpdatedAt,
+      },
+    });
+
+    const proposedEnvelope = Buffer.alloc(61, 0x99);
+
+    proposedEnvelope[0] = 1;
+
+    const response = await request(app)
+      .post('/api/v1/crypto/master-password/change')
+      .set('Cookie', `pm_session=${token}`)
+      .send({
+        protocolVersion: 1,
+
+        kdf: {
+          algorithm: 'ARGON2ID',
+
+          profileVersion: 1,
+
+          memoryKib: 19 * 1024,
+
+          iterations: 2,
+
+          parallelism: 1,
+
+          salt: Buffer.alloc(16, 0x77).toString('base64url'),
+        },
+
+        rootKey: {
+          keyVersion: unlockContext.body.rootKey.keyVersion,
+
+          envelopeVersion: 1,
+
+          expectedUpdatedAt: staleUpdatedAt,
+
+          envelope: proposedEnvelope.toString('base64url'),
+        },
+      });
+
+    expect(response.status).toBe(409);
+
+    expect(response.body.error.code).toBe('MASTER_PASSWORD_CHANGE_CONFLICT');
+
+    const rootAfter = await prisma.rootKeyEnvelope.findUniqueOrThrow({
+      where: {
+        id: currentRoot.id,
+      },
+    });
+
+    expect(Array.from(rootAfter.encryptedKey)).toEqual(Array.from(replacementEnvelope));
+
+    const profileAfter = await prisma.userCryptoProfile.findUniqueOrThrow({
+      where: {
+        id: cryptoProfileId,
+      },
+    });
+
+    expect(Array.from(profileAfter.kdfSalt)).toEqual(Array.from(profileBefore.kdfSalt));
+
+    /*
+     * Failed change does not revoke sessions.
      */
     const sessions = await prisma.session.findMany({
       where: {

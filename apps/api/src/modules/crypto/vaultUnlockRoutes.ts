@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { requireSession } from '../auth/sessionMiddleware.js';
 
 import {
+  changeMasterPasswordRequest,
   completeMasterPasswordRecoveryRequest,
   getMasterPasswordRecovery,
   getVaultUnlock,
@@ -16,6 +17,8 @@ export function createVaultUnlockRouter() {
   router.get('/recovery', requireSession, getMasterPasswordRecovery);
 
   router.post('/recovery/complete', requireSession, completeMasterPasswordRecoveryRequest);
+
+  router.post('/master-password/change', requireSession, changeMasterPasswordRequest);
 
   return router;
 }
