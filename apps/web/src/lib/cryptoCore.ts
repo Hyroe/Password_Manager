@@ -5,8 +5,10 @@ import initCryptoWasm, {
   crypto_argon2_parallelism,
   crypto_kdf_profile_version,
   crypto_protocol_version,
+  recover_master_password,
   unlock_personal_vault,
   type AccountBootstrapResult,
+  type MasterPasswordRecoveryResult,
   type UnlockedVault,
 } from '@pm/crypto-core';
 
@@ -103,6 +105,36 @@ export async function unlockPersonalVault(input: UnlockPersonalVaultInput): Prom
 
     input.vaultKeyEnvelope,
     input.vaultKeyAad,
+  );
+}
+
+interface RecoverMasterPasswordInput {
+  newMasterPassword: string;
+
+  accountSecret: Uint8Array;
+  recoveryKey: Uint8Array;
+
+  recoveryRootKeyEnvelope: Uint8Array;
+  recoveryRootKeyAad: Uint8Array;
+
+  rootKeyAad: Uint8Array;
+}
+
+export async function recoverMasterPassword(
+  input: RecoverMasterPasswordInput,
+): Promise<MasterPasswordRecoveryResult> {
+  await initializeCryptoCore();
+
+  return recover_master_password(
+    input.newMasterPassword,
+
+    input.accountSecret,
+    input.recoveryKey,
+
+    input.recoveryRootKeyEnvelope,
+    input.recoveryRootKeyAad,
+
+    input.rootKeyAad,
   );
 }
 
@@ -226,4 +258,4 @@ export async function decryptLoginItem(input: DecryptLoginItemInput): Promise<Lo
   }
 }
 
-export type { AccountBootstrapResult, UnlockedVault };
+export type { AccountBootstrapResult, MasterPasswordRecoveryResult, UnlockedVault };
