@@ -10,6 +10,8 @@ import { generatePassword } from './lib/passwordGenerator';
 
 import { routes } from './lib/routes';
 
+import { evaluatePasswordStrength, type PasswordStrengthAssessment } from './lib/passwordStrength';
+
 import {
   createVaultSearchEntry,
   filterVaultSearchEntries,
@@ -131,6 +133,50 @@ interface CompleteBootstrapResponse {
   status: 'ACTIVE';
 }
 
+interface PasswordStrengthFeedbackProps {
+  assessment: PasswordStrengthAssessment | null;
+  loading: boolean;
+}
+
+function PasswordStrengthFeedback({ assessment, loading }: PasswordStrengthFeedbackProps) {
+  if (loading) {
+    return <p aria-live="polite">Evaluating password strength…</p>;
+  }
+
+  if (!assessment || assessment.status === 'empty') {
+    return null;
+  }
+
+  return (
+    <div aria-live="polite">
+      <p>
+        <strong>Password strength:</strong> {assessment.label}
+      </p>
+
+      {assessment.status === 'estimated' && assessment.score !== null && (
+        <meter
+          min={0}
+          max={4}
+          value={assessment.score}
+          aria-label={`Password strength: ${assessment.label}`}
+        >
+          {assessment.score} out of 4
+        </meter>
+      )}
+
+      {assessment.warning && <p>{assessment.warning}</p>}
+
+      {assessment.suggestions.length > 0 && (
+        <ul>
+          {assessment.suggestions.map((suggestion) => (
+            <li key={suggestion}>{suggestion}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [email, setEmail] = useState('');
 
@@ -209,6 +255,24 @@ export default function App() {
   const loginNotesRef = useRef<HTMLTextAreaElement>(null);
 
   const [editingLogin, setEditingLogin] = useState(false);
+
+  const [newLoginPasswordStrength, setNewLoginPasswordStrength] =
+    useState<PasswordStrengthAssessment | null>(null);
+
+  const [newLoginPasswordStrengthLoading, setNewLoginPasswordStrengthLoading] = useState(false);
+
+  const [editLoginPasswordStrength, setEditLoginPasswordStrength] =
+    useState<PasswordStrengthAssessment | null>(null);
+
+  const [editLoginPasswordStrengthLoading, setEditLoginPasswordStrengthLoading] = useState(false);
+
+  const newLoginPasswordStrengthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const editLoginPasswordStrengthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const newLoginPasswordStrengthRequestRef = useRef(0);
+
+  const editLoginPasswordStrengthRequestRef = useRef(0);
 
   const [newLoginPasswordVisible, setNewLoginPasswordVisible] = useState(false);
 
@@ -465,6 +529,121 @@ export default function App() {
     [runtimeState, rebuildVaultSearchIndex, navigate],
   );
 
+  const clearNewLoginPasswordStrength = useCallback(() => {
+    newLoginPasswordStrengthRequestRef.current += 1;
+
+    if (newLoginPasswordStrengthTimerRef.current) {
+      clearTimeout(newLoginPasswordStrengthTimerRef.current);
+
+      newLoginPasswordStrengthTimerRef.current = null;
+    }
+
+    setNewLoginPasswordStrength(null);
+    setNewLoginPasswordStrengthLoading(false);
+  }, []);
+
+  const clearEditLoginPasswordStrength = useCallback(() => {
+    editLoginPasswordStrengthRequestRef.current += 1;
+
+    if (editLoginPasswordStrengthTimerRef.current) {
+      clearTimeout(editLoginPasswordStrengthTimerRef.current);
+
+      editLoginPasswordStrengthTimerRef.current = null;
+    }
+
+    setEditLoginPasswordStrength(null);
+    setEditLoginPasswordStrengthLoading(false);
+  }, []);
+
+  const scheduleNewLoginPasswordStrength = useCallback(() => {
+    const requestId = ++newLoginPasswordStrengthRequestRef.current;
+
+    if (newLoginPasswordStrengthTimerRef.current) {
+      clearTimeout(newLoginPasswordStrengthTimerRef.current);
+    }
+
+    setNewLoginPasswordStrength(null);
+    setNewLoginPasswordStrengthLoading(false);
+
+    newLoginPasswordStrengthTimerRef.current = setTimeout(() => {
+      newLoginPasswordStrengthTimerRef.current = null;
+
+      if (newLoginPasswordStrengthRequestRef.current !== requestId) {
+        return;
+      }
+
+      /*
+       * Read plaintext only after the debounce
+       * expires. It is never copied into React state.
+       */
+      const password = loginPasswordRef.current?.value ?? '';
+
+      if (!password) {
+        setNewLoginPasswordStrength(null);
+        return;
+      }
+
+      const context = [
+        loginNameRef.current?.value ?? '',
+        loginUsernameRef.current?.value ?? '',
+        loginUrlRef.current?.value ?? '',
+      ];
+
+      setNewLoginPasswordStrengthLoading(true);
+
+      void evaluatePasswordStrength(password, context).then((assessment) => {
+        if (newLoginPasswordStrengthRequestRef.current !== requestId) {
+          return;
+        }
+
+        setNewLoginPasswordStrength(assessment);
+        setNewLoginPasswordStrengthLoading(false);
+      });
+    }, 350);
+  }, []);
+
+  const scheduleEditLoginPasswordStrength = useCallback(() => {
+    const requestId = ++editLoginPasswordStrengthRequestRef.current;
+
+    if (editLoginPasswordStrengthTimerRef.current) {
+      clearTimeout(editLoginPasswordStrengthTimerRef.current);
+    }
+
+    editLoginPasswordStrengthTimerRef.current = setTimeout(() => {
+      editLoginPasswordStrengthTimerRef.current = null;
+
+      if (editLoginPasswordStrengthRequestRef.current !== requestId) {
+        return;
+      }
+
+      const password = editPasswordRef.current?.value ?? '';
+
+      if (!password) {
+        setEditLoginPasswordStrength(null);
+        setEditLoginPasswordStrengthLoading(false);
+
+        return;
+      }
+
+      const context = [
+        editNameRef.current?.value ?? '',
+        editUsernameRef.current?.value ?? '',
+        editUrlRef.current?.value ?? '',
+      ];
+
+      setEditLoginPasswordStrengthLoading(true);
+
+      void evaluatePasswordStrength(password, context).then((assessment) => {
+        if (editLoginPasswordStrengthRequestRef.current !== requestId) {
+          return;
+        }
+
+        setEditLoginPasswordStrength(assessment);
+        setEditLoginPasswordStrengthLoading(false);
+      });
+    }, 350);
+  }, []);
+
   const clearVaultUiState = useCallback(() => {
     vaultItemsRef.current = [];
     deletedVaultItemsRef.current = [];
@@ -487,6 +666,9 @@ export default function App() {
     setNewLoginPasswordVisible(false);
     setSelectedLoginPasswordVisible(false);
     setEditLoginPasswordVisible(false);
+
+    clearNewLoginPasswordStrength();
+    clearEditLoginPasswordStrength();
 
     if (loginNameRef.current) {
       loginNameRef.current.value = '';
@@ -527,7 +709,7 @@ export default function App() {
     if (editNotesRef.current) {
       editNotesRef.current.value = '';
     }
-  }, []);
+  }, [clearNewLoginPasswordStrength, clearEditLoginPasswordStrength]);
 
   const disposeUnlockedVault = useCallback(() => {
     const unlocked = unlockedVaultRef.current;
@@ -794,6 +976,32 @@ export default function App() {
       replace: true,
     });
   }, [runtimeState, location.pathname, navigate]);
+
+  useEffect(() => {
+    if (!editingLogin) {
+      return;
+    }
+
+    /*
+     * The edit form has now committed, so its
+     * uncontrolled DOM refs are available.
+     */
+    scheduleEditLoginPasswordStrength();
+
+    return () => {
+      /*
+       * Invalidate pending work without calling
+       * React setState from the effect cleanup.
+       */
+      editLoginPasswordStrengthRequestRef.current += 1;
+
+      if (editLoginPasswordStrengthTimerRef.current) {
+        clearTimeout(editLoginPasswordStrengthTimerRef.current);
+
+        editLoginPasswordStrengthTimerRef.current = null;
+      }
+    };
+  }, [editingLogin, selectedItemId, scheduleEditLoginPasswordStrength]);
 
   useEffect(() => {
     vaultItemsRef.current = vaultItems;
@@ -1765,6 +1973,7 @@ export default function App() {
       if (loginPasswordRef.current) {
         loginPasswordRef.current.value = '';
         setNewLoginPasswordVisible(false);
+        clearNewLoginPasswordStrength();
       }
 
       setLoading(false);
@@ -1782,6 +1991,8 @@ export default function App() {
 
     passwordInput.value = generatePassword();
 
+    scheduleNewLoginPasswordStrength();
+
     setMessage('Password generated locally.');
   }
 
@@ -1795,6 +2006,8 @@ export default function App() {
     resetMessages();
 
     passwordInput.value = generatePassword();
+
+    scheduleEditLoginPasswordStrength();
 
     setMessage('Password generated locally.');
   }
@@ -1945,7 +2158,8 @@ export default function App() {
       return;
     }
 
-    setEditLoginPasswordVisible(false);
+    clearEditLoginPasswordStrength();
+
     setEditingLogin(true);
 
     resetMessages();
@@ -1957,6 +2171,7 @@ export default function App() {
 
     if (editPasswordRef.current) {
       editPasswordRef.current.value = '';
+      clearEditLoginPasswordStrength();
     }
   }
 
@@ -2119,6 +2334,7 @@ export default function App() {
 
       if (editPasswordRef.current) {
         editPasswordRef.current.value = '';
+        clearEditLoginPasswordStrength();
       }
 
       setLoading(false);
@@ -3057,7 +3273,13 @@ export default function App() {
               <div>
                 <label>
                   Name
-                  <input ref={loginNameRef} type="text" autoComplete="off" placeholder="GitHub" />
+                  <input
+                    ref={loginNameRef}
+                    type="text"
+                    autoComplete="off"
+                    placeholder="GitHub"
+                    onChange={scheduleNewLoginPasswordStrength}
+                  />
                 </label>
               </div>
 
@@ -3069,6 +3291,7 @@ export default function App() {
                     type="text"
                     autoComplete="off"
                     placeholder="you@example.com"
+                    onChange={scheduleNewLoginPasswordStrength}
                   />
                 </label>
               </div>
@@ -3081,6 +3304,7 @@ export default function App() {
                     type={newLoginPasswordVisible ? 'text' : 'password'}
                     autoComplete="off"
                     placeholder="Password"
+                    onChange={scheduleNewLoginPasswordStrength}
                   />
                 </label>
 
@@ -3099,6 +3323,11 @@ export default function App() {
                 </button>
               </div>
 
+              <PasswordStrengthFeedback
+                assessment={newLoginPasswordStrength}
+                loading={newLoginPasswordStrengthLoading}
+              />
+
               <div>
                 <label>
                   URL
@@ -3107,6 +3336,7 @@ export default function App() {
                     type="url"
                     autoComplete="off"
                     placeholder="https://example.com"
+                    onChange={scheduleNewLoginPasswordStrength}
                   />
                 </label>
               </div>
@@ -3336,6 +3566,7 @@ export default function App() {
                             type="text"
                             autoComplete="off"
                             defaultValue={selectedLogin.name}
+                            onChange={scheduleEditLoginPasswordStrength}
                           />
                         </label>
                       </div>
@@ -3348,6 +3579,7 @@ export default function App() {
                             type="text"
                             autoComplete="off"
                             defaultValue={selectedLogin.username}
+                            onChange={scheduleEditLoginPasswordStrength}
                           />
                         </label>
                       </div>
@@ -3360,6 +3592,7 @@ export default function App() {
                             type={editLoginPasswordVisible ? 'text' : 'password'}
                             autoComplete="off"
                             defaultValue={selectedLogin.password}
+                            onChange={scheduleEditLoginPasswordStrength}
                           />
                         </label>
 
@@ -3382,6 +3615,11 @@ export default function App() {
                         </button>
                       </div>
 
+                      <PasswordStrengthFeedback
+                        assessment={editLoginPasswordStrength}
+                        loading={editLoginPasswordStrengthLoading}
+                      />
+
                       <div>
                         <label>
                           URL
@@ -3390,6 +3628,7 @@ export default function App() {
                             type="url"
                             autoComplete="off"
                             defaultValue={selectedLogin.urls[0] ?? ''}
+                            onChange={scheduleEditLoginPasswordStrength}
                           />
                         </label>
                       </div>
