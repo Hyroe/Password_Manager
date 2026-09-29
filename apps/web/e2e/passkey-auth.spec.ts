@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 interface RegistrationResponse {
   registrationId: string;
@@ -6,6 +6,36 @@ interface RegistrationResponse {
 
 interface VerificationMessageResponse {
   token: string;
+}
+
+async function unlockVault(
+  page: Page,
+  recoveryKitPath: string,
+  masterPassword: string,
+): Promise<void> {
+  await page.getByLabel('Recovery Kit').setInputFiles(recoveryKitPath);
+
+  const unlockButton = page.getByRole('button', {
+    name: 'Unlock vault',
+  });
+
+  await expect(unlockButton).toBeVisible();
+
+  await page
+    .getByPlaceholder('Master Password', {
+      exact: true,
+    })
+    .fill(masterPassword);
+
+  await unlockButton.click();
+
+  await expect(
+    page.getByRole('heading', {
+      name: 'Vault unlocked',
+    }),
+  ).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 test.describe('real passkey authentication', () => {
@@ -178,6 +208,10 @@ test.describe('real passkey authentication', () => {
 
     const download = await downloadPromise;
 
+    const recoveryKitPath = testInfo.outputPath('recovery-kit.json');
+
+    await download.saveAs(recoveryKitPath);
+
     await download.delete();
 
     await expect(
@@ -281,5 +315,76 @@ test.describe('real passkey authentication', () => {
         name: 'Vault locked',
       }),
     ).toBeVisible();
+
+    /*
+     * Unlock using the real Recovery Kit,
+     * Account Secret and Master Password.
+     */
+    await unlockVault(page, recoveryKitPath, masterPassword);
+
+    await expect(
+      page.getByRole('button', {
+        name: 'Lock vault',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Explicit lock destroys the in-memory
+     * UnlockedVault while keeping the
+     * authenticated server session.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Lock vault',
+      })
+      .click();
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    /*
+     * handleLockVault() also discards the
+     * locally loaded Recovery Kit, so the
+     * user must load it again.
+     */
+    await unlockVault(page, recoveryKitPath, masterPassword);
+
+    /*
+     * A full document reload destroys the
+     * WASM runtime and its unwrapped keys.
+     *
+     * The HttpOnly authenticated session
+     * survives, so the resulting state must
+     * be AUTHENTICATED_LOCKED, not SIGNED_OUT
+     * and not UNLOCKED.
+     */
+    await page.reload();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault unlocked',
+      }),
+    ).not.toBeVisible();
+
+    await expect(
+      page.getByRole('button', {
+        name: 'Lock vault',
+      }),
+    ).not.toBeVisible();
   });
 });
