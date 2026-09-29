@@ -170,6 +170,8 @@ export default function App() {
 
   const recoveryKitRef = useRef<RecoveryKit | null>(null);
 
+  const recoveryKitRouteRef = useRef<string | null>(null);
+
   const recoveryKitFileRef = useRef<HTMLInputElement>(null);
 
   const unlockMasterPasswordRef = useRef<HTMLInputElement>(null);
@@ -1194,6 +1196,10 @@ export default function App() {
 
   async function handleRecoveryKitFile(file: File | undefined) {
     resetMessages();
+    recoveryKitRef.current = null;
+    recoveryKitRouteRef.current = null;
+
+    setRecoveryKitLoaded(false);
 
     if (!file) {
       discardRecoveryKit();
@@ -1218,6 +1224,7 @@ export default function App() {
       }
 
       recoveryKitRef.current = recoveryKit;
+      recoveryKitRouteRef.current = location.pathname;
 
       setRecoveryKitLoaded(true);
 
@@ -2225,6 +2232,7 @@ export default function App() {
 
   const discardRecoveryKit = useCallback(() => {
     recoveryKitRef.current = null;
+    recoveryKitRouteRef.current = null;
 
     setRecoveryKitLoaded(false);
 
@@ -2232,6 +2240,32 @@ export default function App() {
       recoveryKitFileRef.current.value = '';
     }
   }, []);
+
+  useEffect(() => {
+    if (!recoveryKitLoaded) {
+      return;
+    }
+
+    const loadedForRoute = recoveryKitRouteRef.current;
+
+    if (loadedForRoute === location.pathname && runtimeState === 'AUTHENTICATED_LOCKED') {
+      return;
+    }
+
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) {
+        return;
+      }
+
+      discardRecoveryKit();
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [recoveryKitLoaded, location.pathname, runtimeState, discardRecoveryKit]);
 
   async function refreshSecuritySessions(showError: boolean): Promise<void> {
     const requestId = ++securitySessionsRequestRef.current;
