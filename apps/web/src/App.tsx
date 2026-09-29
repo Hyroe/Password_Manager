@@ -2689,63 +2689,34 @@ export default function App() {
 
           {isSecurityRoute && (
             <>
-              <h3>Security</h3>
+              <hr />
 
-              <label>
-                Recovery Kit
-                <input
-                  ref={recoveryKitFileRef}
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={(event) => {
-                    void handleRecoveryKitFile(event.target.files?.[0]);
-                  }}
-                />
-              </label>
+              <h3>Security settings</h3>
 
-              {recoveryKitLoaded && (
-                <>
-                  <hr />
+              <p>
+                <strong>Vault status:</strong> Locked
+              </p>
 
-                  <h3>Change Master Password</h3>
+              <p>
+                Your account is authenticated, but vault keys are not loaded in this browser
+                session.
+              </p>
 
-                  <p>
-                    Replace your current Master Password without changing your Recovery Kit or
-                    re-encrypting existing vault items.
-                  </p>
-
-                  <input
-                    ref={changeCurrentMasterPasswordRef}
-                    type="password"
-                    placeholder="Current Master Password"
-                    autoComplete="current-password"
-                  />
-
-                  <input
-                    ref={changeNewMasterPasswordRef}
-                    type="password"
-                    placeholder="New Master Password"
-                    autoComplete="new-password"
-                  />
-
-                  <input
-                    ref={changeConfirmMasterPasswordRef}
-                    type="password"
-                    placeholder="Confirm new Master Password"
-                    autoComplete="new-password"
-                  />
-
-                  <button type="button" disabled={loading} onClick={handleChangeMasterPassword}>
-                    Change Master Password
-                  </button>
-                </>
-              )}
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.vault);
+                }}
+              >
+                Back to vault
+              </button>
 
               <hr />
 
-              <h3>Sessions</h3>
+              <h4>Sessions</h4>
 
-              <p>Review active authenticated sessions for your account.</p>
+              <p>Review and revoke authenticated sessions for your account.</p>
 
               <button
                 type="button"
@@ -2792,15 +2763,81 @@ export default function App() {
 
               <hr />
 
+              <h4>Master Password</h4>
+
+              <p>
+                Changing your Master Password re-wraps the account root key. Existing vault items
+                are not re-encrypted.
+              </p>
+
+              <p>Load your Recovery Kit locally to continue.</p>
+
+              <label>
+                Recovery Kit
+                <input
+                  ref={recoveryKitFileRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={(event) => {
+                    void handleRecoveryKitFile(event.target.files?.[0]);
+                  }}
+                />
+              </label>
+
+              {recoveryKitLoaded && (
+                <>
+                  <div>
+                    <input
+                      ref={changeCurrentMasterPasswordRef}
+                      type="password"
+                      placeholder="Current Master Password"
+                      autoComplete="current-password"
+                    />
+                  </div>
+
+                  <div>
+                    <input
+                      ref={changeNewMasterPasswordRef}
+                      type="password"
+                      placeholder="New Master Password"
+                      autoComplete="new-password"
+                    />
+                  </div>
+
+                  <div>
+                    <input
+                      ref={changeConfirmMasterPasswordRef}
+                      type="password"
+                      placeholder="Confirm new Master Password"
+                      autoComplete="new-password"
+                    />
+                  </div>
+
+                  <button type="button" disabled={loading} onClick={handleChangeMasterPassword}>
+                    Change Master Password
+                  </button>
+                </>
+              )}
+
+              <hr />
+
+              <h4>Account recovery</h4>
+
+              <p>
+                If you no longer know your current Master Password, use the recovery flow instead.
+              </p>
+
               <button
                 type="button"
                 disabled={loading}
                 onClick={() => {
-                  navigate(routes.vault);
+                  navigate(routes.recovery);
                 }}
               >
-                Back to vault
+                Recover Master Password
               </button>
+
+              <hr />
 
               <button type="button" disabled={loading} onClick={handleLogout}>
                 Sign out
@@ -3242,23 +3279,47 @@ export default function App() {
             <>
               <hr />
 
-              <h3>Security</h3>
+              <h3>Security settings</h3>
 
               <p>
-                Your vault is currently unlocked. Vault keys remain available only in this browser
-                session.
+                <strong>Vault status:</strong> Unlocked
               </p>
+
+              <p>
+                Vault keys are currently available only inside the local WASM runtime for this
+                browser session.
+              </p>
+
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  navigate(routes.vault);
+                }}
+              >
+                Back to vault
+              </button>
+
+              <hr />
 
               <h4>Sessions</h4>
 
-              <p>Review active authenticated sessions for your account.</p>
+              <p>Review and revoke authenticated sessions for your account.</p>
 
-              <button type="button" disabled={loading} onClick={handleLoadSessions}>
-                Load sessions
+              <button
+                type="button"
+                disabled={loading || securitySessionsLoading}
+                onClick={handleLoadSessions}
+              >
+                {securitySessionsLoading ? 'Loading sessions…' : 'Refresh sessions'}
               </button>
 
               {managedSessions.length > 1 && (
-                <button type="button" disabled={loading} onClick={handleRevokeOtherSessions}>
+                <button
+                  type="button"
+                  disabled={loading || securitySessionsLoading}
+                  onClick={handleRevokeOtherSessions}
+                >
                   Sign out other sessions
                 </button>
               )}
@@ -3276,7 +3337,7 @@ export default function App() {
                       <br />
                       <button
                         type="button"
-                        disabled={loading}
+                        disabled={loading || securitySessionsLoading}
                         onClick={() => {
                           void handleRevokeManagedSession(session.id, session.current);
                         }}
@@ -3309,18 +3370,6 @@ export default function App() {
                 }}
               >
                 Lock vault to change Master Password
-              </button>
-
-              <hr />
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.vault);
-                }}
-              >
-                Back to vault
               </button>
             </>
           )}
