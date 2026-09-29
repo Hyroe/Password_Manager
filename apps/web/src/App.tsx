@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -12,11 +12,9 @@ import { routes } from './lib/routes';
 
 import { evaluatePasswordStrength, type PasswordStrengthAssessment } from './lib/passwordStrength';
 
-import {
-  createVaultSearchEntry,
-  filterVaultSearchEntries,
-  type VaultSearchEntry,
-} from './lib/vaultSearch';
+import { createVaultSearchEntry, type VaultSearchEntry } from './lib/vaultSearch';
+
+import { createVaultListView } from './lib/vaultList';
 
 import {
   browserSupportsWebAuthn,
@@ -340,7 +338,10 @@ export default function App() {
 
   const routedItemLoadRef = useRef<string | null>(null);
 
-  const filteredVaultSearchEntries = filterVaultSearchEntries(vaultSearchEntries, vaultSearchQuery);
+  const vaultListView = useMemo(
+    () => createVaultListView(vaultSearchEntries, vaultSearchQuery),
+    [vaultSearchEntries, vaultSearchQuery],
+  );
 
   const rebuildVaultSearchIndex = useCallback(
     async (items: EncryptedVaultItem[]): Promise<void> => {
@@ -3354,7 +3355,7 @@ export default function App() {
 
               <hr />
 
-              <h3>Vault items</h3>
+              <h3>Vault items ({vaultListView.totalCount})</h3>
 
               <div>
                 <label>
@@ -3369,6 +3370,18 @@ export default function App() {
                     }}
                   />
                 </label>
+
+                {vaultListView.hasQuery && (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setVaultSearchQuery('');
+                    }}
+                  >
+                    Clear search
+                  </button>
+                )}
               </div>
 
               <button
@@ -3386,56 +3399,71 @@ export default function App() {
               {vaultSearchIndexError && <p role="alert">{vaultSearchIndexError}</p>}
 
               {vaultItems.length === 0 ? (
-                <p>No saved items yet.</p>
+                <p>No saved logins yet.</p>
               ) : vaultSearchIndexing &&
                 vaultSearchEntries.length === 0 ? null : vaultSearchEntries.length === 0 ? (
                 <p>No vault items could be indexed locally.</p>
-              ) : filteredVaultSearchEntries.length === 0 ? (
-                <p>No matching logins.</p>
               ) : (
-                <ul>
-                  {filteredVaultSearchEntries.map((entry) => (
-                    <li key={entry.itemId}>
-                      <strong>{entry.name}</strong>
-                      {entry.username && (
-                        <>
-                          {' — '}
-                          {entry.username}
-                        </>
-                      )}
-                      {entry.urls[0] && (
-                        <>
-                          <br />
-                          {entry.urls[0]}
-                        </>
-                      )}
-                      <br />
-                      <button
-                        type="button"
-                        disabled={loading || vaultSearchIndexing}
-                        onClick={() => {
-                          handleViewLoginItem(entry.itemId);
-                        }}
-                      >
-                        View
-                      </button>{' '}
-                      <button
-                        type="button"
-                        disabled={loading || vaultSearchIndexing}
-                        onClick={() => {
-                          void handleDeleteLoginItem(entry.itemId);
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  {vaultListView.hasQuery ? (
+                    <p>
+                      Showing {vaultListView.visibleCount} of {vaultListView.totalCount}{' '}
+                      {vaultListView.totalCount === 1 ? 'login' : 'logins'}.
+                    </p>
+                  ) : (
+                    <p>
+                      {vaultListView.totalCount}{' '}
+                      {vaultListView.totalCount === 1 ? 'login' : 'logins'}.
+                    </p>
+                  )}
+
+                  {vaultListView.emptyState === 'NO_SEARCH_RESULTS' ? (
+                    <p>No logins match your search.</p>
+                  ) : (
+                    <ul>
+                      {vaultListView.entries.map((entry) => (
+                        <li key={entry.itemId}>
+                          <div>
+                            <strong>{entry.name}</strong>
+                          </div>
+
+                          {entry.username && <div>{entry.username}</div>}
+
+                          {entry.urls[0] && <div>{entry.urls[0]}</div>}
+
+                          <div>
+                            <button
+                              type="button"
+                              disabled={loading || vaultSearchIndexing}
+                              onClick={() => {
+                                handleViewLoginItem(entry.itemId);
+                              }}
+                            >
+                              View
+                            </button>{' '}
+                            <button
+                              type="button"
+                              disabled={loading || vaultSearchIndexing}
+                              onClick={() => {
+                                void handleDeleteLoginItem(entry.itemId);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               )}
 
-              <hr />
+              <h3>Deleted items ({deletedVaultItems.length})</h3>
 
-              <h3>Deleted items</h3>
+              <p>
+                Deleted items are retained temporarily so their deletion state can synchronize
+                across clients.
+              </p>
 
               {deletedVaultItems.length === 0 ? (
                 <p>No deleted items.</p>
@@ -3443,11 +3471,20 @@ export default function App() {
                 <ul>
                   {deletedVaultItems.map((item) => (
                     <li key={item.id}>
-                      <code>{item.id}</code>
-                      {' — revision '}
-                      {item.revisionNumber}
-                      {' — deleted '}
-                      {item.deletedAt ? new Date(item.deletedAt).toLocaleString() : ''}{' '}
+                      <div>
+                        <strong>Deleted login</strong>
+                      </div>
+
+                      <div>
+                        Item ID: <code>{item.id}</code>
+                      </div>
+
+                      <div>Revision: {item.revisionNumber}</div>
+
+                      {item.deletedAt && (
+                        <div>Deleted: {new Date(item.deletedAt).toLocaleString()}</div>
+                      )}
+
                       <button
                         type="button"
                         disabled={loading}
