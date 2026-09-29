@@ -1531,6 +1531,14 @@ export default function App() {
       return;
     }
 
+    const confirmed = window.confirm(
+      'Recover your Master Password? This will replace the current Master Password and sign out every authenticated session.',
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -1543,11 +1551,9 @@ export default function App() {
       });
 
       /*
-       * Successful recovery revokes every
-       * authenticated session server-side,
-       * including the session used here.
-       *
-       * No vault keys should remain loaded.
+       * Recovery revokes every authenticated
+       * server session. No authenticated or
+       * decrypted client state may survive.
        */
       disposeUnlockedVault();
 
@@ -1555,34 +1561,58 @@ export default function App() {
 
       discardRecoveryFlowState();
 
+      /*
+       * Invalidate any outstanding Security
+       * session request before removing its UI state.
+       */
+      securitySessionsRequestRef.current += 1;
+
+      setManagedSessions([]);
+
       setAuthenticatedUser(null);
 
       setRuntimeState('SIGNED_OUT');
 
-      setMessage(
-        'Master Password recovered successfully. Sign in again with your passkey, then unlock the vault with your new Master Password.',
-      );
+      setError('');
+
+      setMessage('Master Password recovered successfully. Sign in again with your passkey.');
+
+      navigate(routes.login, {
+        replace: true,
+      });
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
 
         clearVaultUiState();
 
-        discardRecoveryKit();
+        discardRecoveryFlowState();
+
+        securitySessionsRequestRef.current += 1;
+
+        setManagedSessions([]);
 
         setAuthenticatedUser(null);
 
         setRuntimeState('SIGNED_OUT');
 
+        setMessage('');
+
         setError(
           'Your session has expired. Authenticate again before recovering your Master Password.',
         );
+
+        navigate(routes.login, {
+          replace: true,
+        });
 
         return;
       }
 
       if (error instanceof ApiError && error.code === 'RECOVERY_CONFLICT') {
         discardRecoveryFlowState();
+
+        setMessage('');
 
         setError(
           'The cryptographic state changed during recovery. Load your Recovery Kit again and retry.',
@@ -1591,8 +1621,14 @@ export default function App() {
         return;
       }
 
+      setMessage('');
+
       setError(error instanceof Error ? error.message : 'Master Password recovery failed.');
     } finally {
+      /*
+       * Password plaintext must not survive
+       * any recovery attempt.
+       */
       if (recoveryNewMasterPasswordRef.current) {
         recoveryNewMasterPasswordRef.current.value = '';
       }
