@@ -988,6 +988,14 @@ export default function App() {
       return;
     }
 
+    const confirmed = window.confirm(
+      'Recover your Master Password? This will replace the current Master Password and sign out every authenticated session.',
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -1545,7 +1553,7 @@ export default function App() {
 
       clearVaultUiState();
 
-      discardRecoveryKit();
+      discardRecoveryFlowState();
 
       setAuthenticatedUser(null);
 
@@ -1574,8 +1582,10 @@ export default function App() {
       }
 
       if (error instanceof ApiError && error.code === 'RECOVERY_CONFLICT') {
+        discardRecoveryFlowState();
+
         setError(
-          'The cryptographic state changed during recovery. Reload the Recovery Kit and try again.',
+          'The cryptographic state changed during recovery. Load your Recovery Kit again and retry.',
         );
 
         return;
@@ -2241,6 +2251,18 @@ export default function App() {
     }
   }, []);
 
+  function discardRecoveryFlowState() {
+    discardRecoveryKit();
+
+    if (recoveryNewMasterPasswordRef.current) {
+      recoveryNewMasterPasswordRef.current.value = '';
+    }
+
+    if (recoveryConfirmMasterPasswordRef.current) {
+      recoveryConfirmMasterPasswordRef.current.value = '';
+    }
+  }
+
   useEffect(() => {
     if (!recoveryKitLoaded) {
       return;
@@ -2847,43 +2869,79 @@ export default function App() {
 
           {isRecoveryRoute && (
             <>
+              <hr />
+
               <h3>Recover Master Password</h3>
 
               <p>
-                Use your Recovery Kit to replace a forgotten Master Password. Existing vault data
-                will remain encrypted with the same account keys.
+                <strong>Vault status:</strong> Locked
               </p>
 
-              <label>
-                Recovery Kit
-                <input
-                  ref={recoveryKitFileRef}
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={(event) => {
-                    void handleRecoveryKitFile(event.target.files?.[0]);
-                  }}
-                />
-              </label>
+              <p>
+                Recovery lets you replace a forgotten Master Password while keeping the existing
+                account and vault encryption keys.
+              </p>
 
-              {recoveryKitLoaded && (
+              <p>
+                Completing recovery will revoke every authenticated session, including this one. You
+                will need to sign in again with your passkey.
+              </p>
+
+              <hr />
+
+              <h4>Recovery Kit</h4>
+
+              {!recoveryKitLoaded ? (
                 <>
-                  <input
-                    ref={recoveryNewMasterPasswordRef}
-                    type="password"
-                    placeholder="New Master Password"
-                    autoComplete="new-password"
-                  />
+                  <p>
+                    Load your Recovery Kit locally. The file is processed only inside this browser
+                    and is not uploaded to the server.
+                  </p>
 
-                  <input
-                    ref={recoveryConfirmMasterPasswordRef}
-                    type="password"
-                    placeholder="Confirm new Master Password"
-                    autoComplete="new-password"
-                  />
+                  <label>
+                    Recovery Kit
+                    <input
+                      ref={recoveryKitFileRef}
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={(event) => {
+                        void handleRecoveryKitFile(event.target.files?.[0]);
+                      }}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <p>Recovery Kit loaded for this recovery session.</p>
+
+                  <button type="button" disabled={loading} onClick={discardRecoveryFlowState}>
+                    Discard Recovery Kit
+                  </button>
+
+                  <hr />
+
+                  <h4>New Master Password</h4>
+
+                  <div>
+                    <input
+                      ref={recoveryNewMasterPasswordRef}
+                      type="password"
+                      placeholder="New Master Password"
+                      autoComplete="new-password"
+                    />
+                  </div>
+
+                  <div>
+                    <input
+                      ref={recoveryConfirmMasterPasswordRef}
+                      type="password"
+                      placeholder="Confirm new Master Password"
+                      autoComplete="new-password"
+                    />
+                  </div>
 
                   <button type="button" disabled={loading} onClick={handleRecoverMasterPassword}>
-                    Recover Master Password
+                    {loading ? 'Recovering…' : 'Recover Master Password'}
                   </button>
                 </>
               )}
@@ -2897,7 +2955,7 @@ export default function App() {
                   navigate(routes.vault);
                 }}
               >
-                Back to vault
+                Cancel recovery
               </button>
             </>
           )}
