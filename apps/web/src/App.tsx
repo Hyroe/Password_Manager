@@ -6,6 +6,8 @@ import { resolveRuntimeRedirect, type RuntimeState } from './lib/runtimeRouting'
 
 import { getVaultItemIdFromPath } from './lib/vaultRouting';
 
+import { generatePassword } from './lib/passwordGenerator';
+
 import { routes } from './lib/routes';
 
 import {
@@ -1769,6 +1771,34 @@ export default function App() {
     }
   }
 
+  function handleGenerateNewLoginPassword() {
+    const passwordInput = loginPasswordRef.current;
+
+    if (!passwordInput) {
+      return;
+    }
+
+    resetMessages();
+
+    passwordInput.value = generatePassword();
+
+    setMessage('Password generated locally.');
+  }
+
+  function handleGenerateEditLoginPassword() {
+    const passwordInput = editPasswordRef.current;
+
+    if (!passwordInput) {
+      return;
+    }
+
+    resetMessages();
+
+    passwordInput.value = generatePassword();
+
+    setMessage('Password generated locally.');
+  }
+
   function handleViewLoginItem(itemId: string) {
     resetMessages();
 
@@ -3052,15 +3082,21 @@ export default function App() {
                     autoComplete="off"
                     placeholder="Password"
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewLoginPasswordVisible((visible) => !visible);
-                    }}
-                  >
-                    {newLoginPasswordVisible ? 'Hide password' : 'Show password'}
-                  </button>
                 </label>
+
+                <button type="button" disabled={loading} onClick={handleGenerateNewLoginPassword}>
+                  Generate password
+                </button>
+
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    setNewLoginPasswordVisible((visible) => !visible);
+                  }}
+                >
+                  {newLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                </button>
               </div>
 
               <div>
@@ -3325,15 +3361,25 @@ export default function App() {
                             autoComplete="off"
                             defaultValue={selectedLogin.password}
                           />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditLoginPasswordVisible((visible) => !visible);
-                            }}
-                          >
-                            {editLoginPasswordVisible ? 'Hide password' : 'Show password'}
-                          </button>
                         </label>
+
+                        <button
+                          type="button"
+                          disabled={loading}
+                          onClick={handleGenerateEditLoginPassword}
+                        >
+                          Generate password
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={loading}
+                          onClick={() => {
+                            setEditLoginPasswordVisible((visible) => !visible);
+                          }}
+                        >
+                          {editLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                        </button>
                       </div>
 
                       <div>
