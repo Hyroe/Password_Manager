@@ -236,6 +236,10 @@ export default function App() {
 
   const [managedSessions, setManagedSessions] = useState<ManagedSession[]>([]);
 
+  const [securitySessionsLoading, setSecuritySessionsLoading] = useState(false);
+
+  const securitySessionsRequestRef = useRef(0);
+
   const [vaultSearchEntries, setVaultSearchEntries] = useState<VaultSearchEntry[]>([]);
 
   const [vaultSearchQuery, setVaultSearchQuery] = useState('');
@@ -2219,7 +2223,7 @@ export default function App() {
     });
   }
 
-  function discardRecoveryKit() {
+  const discardRecoveryKit = useCallback(() => {
     recoveryKitRef.current = null;
 
     setRecoveryKitLoaded(false);
@@ -2227,7 +2231,136 @@ export default function App() {
     if (recoveryKitFileRef.current) {
       recoveryKitFileRef.current.value = '';
     }
+  }, []);
+
+  async function refreshSecuritySessions(showError: boolean): Promise<void> {
+    const requestId = ++securitySessionsRequestRef.current;
+
+    setSecuritySessionsLoading(true);
+
+    try {
+      const sessions = await listSessions();
+
+      if (securitySessionsRequestRef.current !== requestId) {
+        return;
+      }
+
+      setManagedSessions(sessions);
+    } catch (error) {
+      if (securitySessionsRequestRef.current !== requestId) {
+        return;
+      }
+
+      if (error instanceof ApiError && error.status === 401) {
+        disposeUnlockedVault();
+
+        discardRecoveryKit();
+
+        clearVaultUiState();
+
+        setManagedSessions([]);
+
+        setAuthenticatedUser(null);
+
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      if (showError) {
+        setError(error instanceof Error ? error.message : 'Sessions could not be loaded.');
+      }
+    } finally {
+      if (securitySessionsRequestRef.current === requestId) {
+        setSecuritySessionsLoading(false);
+      }
+    }
   }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const securityRouteActive =
+      isSecurityRoute && (runtimeState === 'AUTHENTICATED_LOCKED' || runtimeState === 'UNLOCKED');
+
+    if (!securityRouteActive) {
+      securitySessionsRequestRef.current += 1;
+
+      queueMicrotask(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setManagedSessions([]);
+        setSecuritySessionsLoading(false);
+      });
+
+      return () => {
+        cancelled = true;
+        securitySessionsRequestRef.current += 1;
+      };
+    }
+
+    const requestId = ++securitySessionsRequestRef.current;
+
+    queueMicrotask(() => {
+      if (cancelled) {
+        return;
+      }
+
+      setSecuritySessionsLoading(true);
+
+      void listSessions()
+        .then((sessions) => {
+          if (cancelled || securitySessionsRequestRef.current !== requestId) {
+            return;
+          }
+
+          setManagedSessions(sessions);
+        })
+        .catch((error: unknown) => {
+          if (cancelled || securitySessionsRequestRef.current !== requestId) {
+            return;
+          }
+
+          if (error instanceof ApiError && error.status === 401) {
+            disposeUnlockedVault();
+
+            discardRecoveryKit();
+
+            clearVaultUiState();
+
+            setManagedSessions([]);
+
+            setAuthenticatedUser(null);
+
+            setRuntimeState('SIGNED_OUT');
+
+            setError('Your session has expired. Authenticate again.');
+
+            return;
+          }
+
+          /*
+           * Automatic loading is best-effort.
+           * Manual refresh exposes the error.
+           */
+        })
+        .finally(() => {
+          if (!cancelled && securitySessionsRequestRef.current === requestId) {
+            setSecuritySessionsLoading(false);
+          }
+        });
+    });
+
+    return () => {
+      cancelled = true;
+
+      securitySessionsRequestRef.current += 1;
+    };
+  }, [isSecurityRoute, runtimeState, clearVaultUiState, discardRecoveryKit, disposeUnlockedVault]);
 
   async function refreshManagedSessions(): Promise<void> {
     const sessions = await listSessions();
@@ -2332,33 +2465,7 @@ export default function App() {
   async function handleLoadSessions() {
     resetMessages();
 
-    setLoading(true);
-
-    try {
-      await refreshManagedSessions();
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        disposeUnlockedVault();
-
-        discardRecoveryKit();
-
-        clearVaultUiState();
-
-        setManagedSessions([]);
-
-        setAuthenticatedUser(null);
-
-        setRuntimeState('SIGNED_OUT');
-
-        setError('Your session has expired. Authenticate again.');
-
-        return;
-      }
-
-      setError(error instanceof Error ? error.message : 'Sessions could not be loaded.');
-    } finally {
-      setLoading(false);
-    }
+    await refreshSecuritySessions(true);
   }
 
   async function activateAccount() {
@@ -2606,12 +2713,20 @@ export default function App() {
 
               <p>Review active authenticated sessions for your account.</p>
 
-              <button type="button" disabled={loading} onClick={handleLoadSessions}>
-                Load sessions
+              <button
+                type="button"
+                disabled={loading || securitySessionsLoading}
+                onClick={handleLoadSessions}
+              >
+                {securitySessionsLoading ? 'Loading sessions…' : 'Refresh sessions'}
               </button>
 
               {managedSessions.length > 1 && (
-                <button type="button" disabled={loading} onClick={handleRevokeOtherSessions}>
+                <button
+                  type="button"
+                  disabled={loading || securitySessionsLoading}
+                  onClick={handleRevokeOtherSessions}
+                >
                   Sign out other sessions
                 </button>
               )}
@@ -2629,7 +2744,7 @@ export default function App() {
                       <br />
                       <button
                         type="button"
-                        disabled={loading}
+                        disabled={loading || securitySessionsLoading}
                         onClick={() => {
                           void handleRevokeManagedSession(session.id, session.current);
                         }}
