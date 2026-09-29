@@ -1177,15 +1177,23 @@ export default function App() {
   }
 
   async function prepareCryptoBootstrap() {
-    if (!registrationId || !bootstrapToken) {
+    resetMessages();
+
+    if (!registrationId) {
+      setError('Registration state is missing. Restart account creation.');
+
+      return;
+    }
+
+    if (!bootstrapToken) {
+      setError('Passkey bootstrap state is missing. Create your passkey again.');
+
       return;
     }
 
     const masterPassword = masterPasswordRef.current?.value ?? '';
 
     const confirmation = confirmMasterPasswordRef.current?.value ?? '';
-
-    resetMessages();
 
     if (masterPassword.length < 12) {
       setError('Master Password must contain at least 12 characters.');
@@ -1196,14 +1204,6 @@ export default function App() {
     if (masterPassword !== confirmation) {
       setError('Master Password confirmation does not match.');
 
-      return;
-    }
-
-    const confirmed = window.confirm(
-      'Recover your Master Password? This will replace the current Master Password and sign out every authenticated session.',
-    );
-
-    if (!confirmed) {
       return;
     }
 

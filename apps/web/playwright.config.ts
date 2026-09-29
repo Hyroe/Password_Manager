@@ -3,6 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
 
+  testIgnore: ['**/passkey-auth.spec.ts'],
+
   fullyParallel: false,
 
   workers: 1,

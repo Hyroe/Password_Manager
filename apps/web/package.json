@@ -12,7 +12,9 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:auth": "playwright test -c playwright.auth.config.ts",
+    "test:e2e:auth-headed": "playwright test -c playwright.auth.config.ts --headed"
   },
   "dependencies": {
     "@pm/crypto-core": "workspace:*",
