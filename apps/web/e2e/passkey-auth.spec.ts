@@ -877,6 +877,161 @@ test.describe('real passkey authentication', () => {
     ).toContainText(updatedLogin.notes);
 
     /*
+     * H3A1 — Current authenticated session lifecycle.
+     *
+     * Start from the restored unlocked vault.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Back to vault',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    /*
+     * SPA navigation into Security must preserve
+     * the current authenticated/unlocked runtime.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Security settings',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/settings\/security$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Security settings',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Vault status:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText('Unlocked');
+
+    /*
+     * Sessions load automatically when the
+     * Security route becomes active.
+     */
+    await expect(
+      page.getByRole('heading', {
+        name: 'Sessions',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page.getByText('Current session', {
+        exact: false,
+      }),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
+
+    /*
+     * Also exercise the manual refresh action.
+     */
+    const refreshSessionsButton = page.getByRole('button', {
+      name: 'Refresh sessions',
+    });
+
+    await expect(refreshSessionsButton).toBeVisible();
+
+    await refreshSessionsButton.click();
+
+    await expect(
+      page.getByText('Current session', {
+        exact: false,
+      }),
+    ).toBeVisible();
+
+    const signOutCurrentSession = page.getByRole('button', {
+      name: 'Sign out this session',
+    });
+
+    await expect(signOutCurrentSession).toBeVisible();
+
+    /*
+     * The account currently has only this
+     * authenticated browser session.
+     */
+    await expect(
+      page.getByRole('button', {
+        name: 'Sign out other sessions',
+      }),
+    ).not.toBeVisible();
+
+    /*
+     * Revoke the authoritative server session.
+     *
+     * This must also destroy:
+     * - authenticated client state
+     * - UnlockedVault
+     * - loaded Recovery Kit
+     * - decrypted vault UI state
+     */
+    await signOutCurrentSession.click();
+
+    await expect(page).toHaveURL(/\/login$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Sign in',
+      }),
+    ).toBeVisible();
+
+    await expect(page.getByText('Current session signed out.')).toBeVisible();
+
+    /*
+     * The server must no longer accept the old
+     * opaque session, not merely hide the UI.
+     */
+    const revokedSessionResponse = await context.request.get('http://localhost:5173/api/v1/me');
+
+    expect(revokedSessionResponse.status()).toBe(401);
+
+    /*
+     * Protected routes must remain unavailable.
+     */
+    await page.goto('/vault');
+
+    await expect(page).toHaveURL(/\/login$/);
+
+    /*
+     * Authenticate again with the existing
+     * real virtual passkey so later H3 tests
+     * can continue from a valid session.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Sign in with passkey',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible();
+
+    const reauthenticatedCookies = await context.cookies();
+
+    const reauthenticatedSession = reauthenticatedCookies.find((cookie) =>
+      cookie.name.includes('pm_session'),
+    );
+
+    expect(reauthenticatedSession).toBeDefined();
+
+    expect(reauthenticatedSession?.httpOnly).toBe(true);
+
+    /*
      * Verify zero-knowledge transport boundary.
      */
     const serializedVaultRequests = vaultRequestBodies.join('\n');
