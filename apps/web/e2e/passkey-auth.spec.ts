@@ -386,5 +386,269 @@ test.describe('real passkey authentication', () => {
         name: 'Lock vault',
       }),
     ).not.toBeVisible();
+
+    /*
+     * H2A — Real encrypted LOGIN CRUD.
+     */
+    await unlockVault(page, recoveryKitPath, masterPassword);
+
+    const login = {
+      name: 'E2E Vault Login 9841',
+      username: 'e2e-user-9841@example.com',
+      password: 'Vault-E2E-Password-9841!',
+      url: 'https://example.com/e2e-9841',
+      notes: 'E2E encrypted notes 9841',
+    };
+
+    const updatedLogin = {
+      name: 'E2E Vault Login Updated 9841',
+      username: 'updated-e2e-9841@example.com',
+      password: 'Updated-Vault-Password-9841!',
+      url: 'https://example.com/e2e-9841-updated',
+      notes: 'Updated encrypted notes 9841',
+    };
+
+    /*
+     * Capture vault mutation bodies.
+     *
+     * Plaintext LOGIN fields must never cross
+     * the client/server boundary.
+     */
+    const vaultRequestBodies: string[] = [];
+
+    page.on('request', (request) => {
+      if (request.url().includes('/api/v1/vaults/') && request.method() !== 'GET') {
+        const body = request.postData();
+
+        if (body) {
+          vaultRequestBodies.push(body);
+        }
+      }
+    });
+
+    /*
+     * CREATE
+     */
+    await page
+      .getByLabel('Name', {
+        exact: true,
+      })
+      .fill(login.name);
+
+    await page
+      .getByLabel('Username', {
+        exact: true,
+      })
+      .fill(login.username);
+
+    await page
+      .getByLabel('Password', {
+        exact: true,
+      })
+      .fill(login.password);
+
+    await page
+      .getByLabel('URL', {
+        exact: true,
+      })
+      .fill(login.url);
+
+    await page
+      .getByLabel('Notes', {
+        exact: true,
+      })
+      .fill(login.notes);
+
+    await page
+      .getByRole('button', {
+        name: 'Save login',
+      })
+      .click();
+
+    await expect(page.getByText('Login encrypted and saved.')).toBeVisible();
+
+    /*
+     * READ through the normal routed item UI.
+     *
+     * This account has only one item, so the
+     * first View action deterministically opens it.
+     */
+    await page
+      .getByRole('button', {
+        name: 'View',
+      })
+      .first()
+      .click();
+
+    await expect(page).toHaveURL(/\/vault\/items\/[^/]+$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Decrypted login',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Name:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(login.name);
+
+    await expect(
+      page
+        .getByText('Username:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(login.username);
+
+    await expect(
+      page.getByText(login.url, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Notes:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(login.notes);
+
+    /*
+     * Password remains hidden by default.
+     */
+    await expect(
+      page.getByText(login.password, {
+        exact: true,
+      }),
+    ).not.toBeVisible();
+
+    await page
+      .getByRole('button', {
+        name: 'Show password',
+      })
+      .click();
+
+    await expect(
+      page.getByText(login.password, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    /*
+     * UPDATE
+     */
+    await page
+      .getByRole('button', {
+        name: 'Edit',
+      })
+      .click();
+
+    const editHeading = page.getByRole('heading', {
+      name: 'Edit login',
+    });
+
+    await expect(editHeading).toBeVisible();
+
+    await page.getByLabel('Name', { exact: true }).fill(updatedLogin.name);
+
+    await expect(editHeading).toBeVisible();
+
+    await page.getByLabel('Username', { exact: true }).fill(updatedLogin.username);
+
+    await expect(editHeading).toBeVisible();
+
+    await page.getByLabel('Password', { exact: true }).fill(updatedLogin.password);
+
+    await expect(editHeading).toBeVisible();
+
+    await page.getByLabel('URL', { exact: true }).fill(updatedLogin.url);
+
+    await expect(editHeading).toBeVisible();
+
+    /*
+     * If this assertion passes, Notes must
+     * still belong to the active edit form.
+     */
+    await page
+      .getByRole('textbox', {
+        name: 'Notes',
+        exact: true,
+      })
+      .fill(updatedLogin.notes);
+
+    await page
+      .getByRole('button', {
+        name: 'Save changes',
+      })
+      .click();
+
+    await expect(page.getByText('Login updated to revision 2.')).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Name:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.name);
+
+    await expect(
+      page
+        .getByText('Username:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.username);
+
+    await expect(
+      page.getByText(updatedLogin.url, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Notes:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.notes);
+
+    /*
+     * Updated password must also remain
+     * hidden by default after the persisted
+     * revision is loaded back.
+     */
+    await expect(
+      page.getByText(updatedLogin.password, {
+        exact: true,
+      }),
+    ).not.toBeVisible();
+
+    await page
+      .getByRole('button', {
+        name: 'Show password',
+      })
+      .click();
+
+    await expect(
+      page.getByText(updatedLogin.password, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    /*
+     * Verify zero-knowledge transport boundary.
+     */
+    const serializedVaultRequests = vaultRequestBodies.join('\n');
+
+    for (const plaintext of [...Object.values(login), ...Object.values(updatedLogin)]) {
+      expect(serializedVaultRequests).not.toContain(plaintext);
+    }
   });
 });
