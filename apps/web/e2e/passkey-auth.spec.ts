@@ -48,6 +48,8 @@ test.describe('real passkey authentication', () => {
 
     const masterPassword = 'E2E Master Password 2026!';
 
+    const changedMasterPassword = 'E2E Changed Master Password 2026!';
+
     /*
      * Must happen before the page touches
      * WebAuthn.
@@ -1219,6 +1221,275 @@ test.describe('real passkey authentication', () => {
     } finally {
       await secondContext.close();
     }
+
+    /*
+     * H3B — Change Master Password.
+     *
+     * H3A2 leaves the primary browser authenticated,
+     * vault locked and on Security settings.
+     */
+    await expect(page).toHaveURL(/\/settings\/security$/);
+
+    await expect(
+      page
+        .getByText('Vault status:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText('Locked');
+
+    /*
+     * Track vault-item mutations during the
+     * Master Password change.
+     *
+     * Re-wrapping the ARK must not rewrite
+     * individual encrypted vault items.
+     */
+    const masterPasswordVaultMutations: string[] = [];
+
+    let captureMasterPasswordChange = false;
+
+    page.on('request', (request) => {
+      if (!captureMasterPasswordChange) {
+        return;
+      }
+
+      const path = new URL(request.url()).pathname;
+
+      if (
+        path.includes('/api/v1/vaults/') &&
+        path.includes('/items') &&
+        request.method() !== 'GET'
+      ) {
+        masterPasswordVaultMutations.push(`${request.method()} ${path}`);
+      }
+    });
+
+    /*
+     * Load the real Recovery Kit.
+     */
+    await page.getByLabel('Recovery Kit').setInputFiles(recoveryKitPath);
+
+    await expect(
+      page.getByText('Recovery Kit loaded locally. It has not been uploaded to the server.'),
+    ).toBeVisible();
+
+    /*
+     * Submit current + new Master Password.
+     */
+    await page
+      .getByPlaceholder('Current Master Password', {
+        exact: true,
+      })
+      .fill(masterPassword);
+
+    await page
+      .getByPlaceholder('New Master Password', {
+        exact: true,
+      })
+      .fill(changedMasterPassword);
+
+    await page
+      .getByPlaceholder('Confirm new Master Password', {
+        exact: true,
+      })
+      .fill(changedMasterPassword);
+
+    captureMasterPasswordChange = true;
+
+    await page
+      .getByRole('button', {
+        name: 'Change Master Password',
+      })
+      .click();
+
+    /*
+     * Successful change revokes every session,
+     * including the one performing the change.
+     */
+    await expect(page).toHaveURL(/\/login$/, {
+      timeout: 30_000,
+    });
+
+    captureMasterPasswordChange = false;
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Sign in',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page.getByText(
+        'Master Password changed successfully. Sign in again with your passkey, then unlock the vault with your new Master Password.',
+      ),
+    ).toBeVisible();
+
+    /*
+     * No vault item was rewritten.
+     */
+    expect(masterPasswordVaultMutations).toEqual([]);
+
+    /*
+     * The old authenticated session is
+     * authoritatively revoked server-side.
+     */
+    const sessionAfterMasterPasswordChange = await context.request.get(
+      'http://localhost:5173/api/v1/me',
+    );
+
+    expect(sessionAfterMasterPasswordChange.status()).toBe(401);
+
+    /*
+     * Authenticate again using the same real
+     * passkey. Authentication remains separate
+     * from vault unlocking.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Sign in with passkey',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Load the same Recovery Kit.
+     */
+    await page.getByLabel('Recovery Kit').setInputFiles(recoveryKitPath);
+
+    const unlockButton = page.getByRole('button', {
+      name: 'Unlock vault',
+    });
+
+    await expect(unlockButton).toBeVisible();
+
+    /*
+     * OLD Master Password must no longer unwrap
+     * the account root key.
+     */
+    await page
+      .getByPlaceholder('Master Password', {
+        exact: true,
+      })
+      .fill(masterPassword);
+
+    await unlockButton.click();
+
+    await expect(page.getByRole('alert')).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault unlocked',
+      }),
+    ).not.toBeVisible();
+
+    /*
+     * NEW Master Password must unwrap the same
+     * account root key successfully.
+     *
+     * The Recovery Kit remains loaded after the
+     * failed unlock attempt.
+     */
+    await page
+      .getByPlaceholder('Master Password', {
+        exact: true,
+      })
+      .fill(changedMasterPassword);
+
+    await unlockButton.click();
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault unlocked',
+      }),
+    ).toBeVisible({
+      timeout: 30_000,
+    });
+
+    /*
+     * Existing encrypted item must still be
+     * present after the key-envelope change.
+     */
+    await expect(
+      page.getByText(updatedLogin.name, {
+        exact: true,
+      }),
+    ).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page
+      .getByRole('button', {
+        name: 'View',
+      })
+      .first()
+      .click();
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Decrypted login',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Name:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.name);
+
+    await expect(
+      page
+        .getByText('Username:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.username);
+
+    await expect(
+      page.getByText(updatedLogin.url, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Notes:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.notes);
+
+    /*
+     * Confirm the secret itself survived too.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Show password',
+      })
+      .click();
+
+    await expect(
+      page.getByText(updatedLogin.password, {
+        exact: true,
+      }),
+    ).toBeVisible();
 
     /*
      * Verify zero-knowledge transport boundary.
