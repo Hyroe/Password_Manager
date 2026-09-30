@@ -14,7 +14,8 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:auth": "playwright test -c playwright.auth.config.ts",
-    "test:e2e:auth-headed": "playwright test -c playwright.auth.config.ts --headed"
+    "test:e2e:auth-headed": "playwright test -c playwright.auth.config.ts --headed",
+    "test:e2e:all": "pnpm test:e2e && pnpm test:e2e:auth"
   },
   "dependencies": {
     "@pm/crypto-core": "workspace:*",
