@@ -42,6 +42,7 @@ test.describe('real passkey authentication', () => {
   test('registers and authenticates with a real virtual passkey', async ({
     page,
     context,
+    browser,
   }, testInfo) => {
     const email = `e2e-passkey-${Date.now()}-${testInfo.workerIndex}@example.com`;
 
@@ -1030,6 +1031,194 @@ test.describe('real passkey authentication', () => {
     expect(reauthenticatedSession).toBeDefined();
 
     expect(reauthenticatedSession?.httpOnly).toBe(true);
+
+    /*
+     * H3A2 — Revoke another authenticated session.
+     *
+     * Create a second isolated browser context
+     * representing another device/browser session.
+     */
+    /*
+     * H3A2 — Revoke another authenticated session.
+     *
+     * We need two real server sessions, not two
+     * independent copies of the same WebAuthn
+     * authenticator.
+     */
+
+    if (!reauthenticatedSession) {
+      throw new Error('Reauthenticated session cookie is unavailable.');
+    }
+
+    /*
+     * Preserve session A.
+     *
+     * Clearing the cookie locally does NOT call
+     * logout, so session A remains valid server-side.
+     */
+    const firstSessionCookie = reauthenticatedSession;
+
+    await context.clearCookies({
+      name: firstSessionCookie.name,
+    });
+
+    /*
+     * Reload forces the application to discover
+     * that this browser no longer presents
+     * session A.
+     */
+    await page.reload();
+
+    await expect(page).toHaveURL(/\/login$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Sign in',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Use the SAME original virtual authenticator.
+     * Its WebAuthn state continues naturally.
+     *
+     * This creates session B.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Sign in with passkey',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Session B is now the primary/current session.
+     */
+    const primarySessionResponse = await context.request.get('http://localhost:5173/api/v1/me');
+
+    expect(primarySessionResponse.status()).toBe(200);
+
+    /*
+     * Create another isolated browser context
+     * containing the still-valid session A.
+     *
+     * No WebAuthn clone is required.
+     */
+    const secondContext = await browser.newContext({
+      storageState: {
+        cookies: [firstSessionCookie],
+        origins: [],
+      },
+    });
+
+    try {
+      const secondPage = await secondContext.newPage();
+
+      await secondPage.goto('http://localhost:5173/vault');
+
+      /*
+       * Session A is genuinely still valid.
+       */
+      await expect(
+        secondPage.getByRole('heading', {
+          name: 'Vault locked',
+        }),
+      ).toBeVisible();
+
+      const secondSessionBeforeRevocation = await secondContext.request.get(
+        'http://localhost:5173/api/v1/me',
+      );
+
+      expect(secondSessionBeforeRevocation.status()).toBe(200);
+
+      /*
+       * Primary session B manages the account.
+       */
+      await page.goto('/settings/security');
+
+      await expect(
+        page.getByRole('heading', {
+          name: 'Security settings',
+        }),
+      ).toBeVisible();
+
+      await page
+        .getByRole('button', {
+          name: 'Refresh sessions',
+        })
+        .click();
+
+      const signOutOtherSessions = page.getByRole('button', {
+        name: 'Sign out other sessions',
+      });
+
+      await expect(signOutOtherSessions).toBeVisible();
+
+      await expect(
+        page.getByText('Current session', {
+          exact: false,
+        }),
+      ).toHaveCount(1);
+
+      /*
+       * Revoke session A while preserving
+       * current session B.
+       */
+      await signOutOtherSessions.click();
+
+      await expect(page.getByText('All other sessions have been signed out.')).toBeVisible();
+
+      /*
+       * Current session B survives.
+       */
+      const primaryAfterRevocation = await context.request.get('http://localhost:5173/api/v1/me');
+
+      expect(primaryAfterRevocation.status()).toBe(200);
+
+      /*
+       * Session A is revoked authoritatively
+       * by the backend.
+       */
+      const secondSessionAfterRevocation = await secondContext.request.get(
+        'http://localhost:5173/api/v1/me',
+      );
+
+      expect(secondSessionAfterRevocation.status()).toBe(401);
+
+      await expect(
+        page.getByRole('button', {
+          name: 'Sign out other sessions',
+        }),
+      ).not.toBeVisible();
+
+      await expect(
+        page.getByRole('button', {
+          name: 'Sign out this session',
+        }),
+      ).toBeVisible();
+
+      /*
+       * The secondary browser discovers the
+       * server-side revocation normally.
+       */
+      await secondPage.reload();
+
+      await expect(secondPage).toHaveURL(/\/login$/);
+
+      await expect(
+        secondPage.getByRole('heading', {
+          name: 'Sign in',
+        }),
+      ).toBeVisible();
+    } finally {
+      await secondContext.close();
+    }
 
     /*
      * Verify zero-knowledge transport boundary.
