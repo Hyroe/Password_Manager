@@ -50,6 +50,8 @@ test.describe('real passkey authentication', () => {
 
     const changedMasterPassword = 'E2E Changed Master Password 2026!';
 
+    const recoveredMasterPassword = 'E2E Recovered Master Password 2026!';
+
     /*
      * Must happen before the page touches
      * WebAuthn.
@@ -1490,6 +1492,378 @@ test.describe('real passkey authentication', () => {
         exact: true,
       }),
     ).toBeVisible();
+
+    /*
+     * H3C — Account recovery.
+     *
+     * H3B ends with the vault unlocked again
+     * using changedMasterPassword, and proves
+     * the existing item still decrypts.
+     */
+
+    /*
+     * Leave the decrypted item and explicitly
+     * destroy the current UnlockedVault.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Back to vault',
+      })
+      .click();
+
+    await page
+      .getByRole('button', {
+        name: 'Lock vault',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Create a second real server session so
+     * recovery can prove account-wide session
+     * revocation, not only current-session logout.
+     */
+    const cookiesBeforeRecovery = await context.cookies();
+
+    const preservedRecoverySession = cookiesBeforeRecovery.find((cookie) =>
+      cookie.name.includes('pm_session'),
+    );
+
+    if (!preservedRecoverySession) {
+      throw new Error('Session cookie before recovery is unavailable.');
+    }
+
+    /*
+     * Remove the cookie only from this browser.
+     * The server-side session remains active.
+     */
+    await context.clearCookies({
+      name: preservedRecoverySession.name,
+    });
+
+    await page.reload();
+
+    await expect(page).toHaveURL(/\/login$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Sign in',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Establish another real session using
+     * the same original virtual authenticator.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Sign in with passkey',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Put the preserved first session into an
+     * isolated browser context.
+     */
+    const recoveryOtherContext = await browser.newContext({
+      storageState: {
+        cookies: [preservedRecoverySession],
+        origins: [],
+      },
+    });
+
+    try {
+      const otherSessionBeforeRecovery = await recoveryOtherContext.request.get(
+        'http://localhost:5173/api/v1/me',
+      );
+
+      expect(otherSessionBeforeRecovery.status()).toBe(200);
+
+      const recoverySessionBefore = await context.request.get('http://localhost:5173/api/v1/me');
+
+      expect(recoverySessionBefore.status()).toBe(200);
+
+      /*
+       * Enter recovery through the real UI.
+       */
+      await page
+        .getByRole('button', {
+          name: 'Recover Master Password',
+        })
+        .click();
+
+      await expect(page).toHaveURL(/\/recovery$/);
+
+      await expect(
+        page.getByRole('heading', {
+          name: 'Recover Master Password',
+        }),
+      ).toBeVisible();
+
+      await expect(
+        page
+          .getByText('Vault status:', {
+            exact: true,
+          })
+          .locator('..'),
+      ).toContainText('Locked');
+
+      /*
+       * Load the original real Recovery Kit.
+       */
+      await page.getByLabel('Recovery Kit').setInputFiles(recoveryKitPath);
+
+      await expect(page.getByText('Recovery Kit loaded for this recovery session.')).toBeVisible();
+
+      await page
+        .getByPlaceholder('New Master Password', {
+          exact: true,
+        })
+        .fill(recoveredMasterPassword);
+
+      await page
+        .getByPlaceholder('Confirm new Master Password', {
+          exact: true,
+        })
+        .fill(recoveredMasterPassword);
+
+      /*
+       * Recovery should change key-envelope state,
+       * not rewrite individual vault items.
+       */
+      const recoveryVaultMutations: string[] = [];
+
+      let captureRecoveryRequests = true;
+
+      page.on('request', (request) => {
+        if (!captureRecoveryRequests) {
+          return;
+        }
+
+        const path = new URL(request.url()).pathname;
+
+        if (
+          path.includes('/api/v1/vaults/') &&
+          path.includes('/items') &&
+          request.method() !== 'GET'
+        ) {
+          recoveryVaultMutations.push(`${request.method()} ${path}`);
+        }
+      });
+
+      /*
+       * Confirm the intentionally destructive
+       * account-recovery operation.
+       */
+      page.once('dialog', async (dialog) => {
+        expect(dialog.type()).toBe('confirm');
+
+        await dialog.accept();
+      });
+
+      await page
+        .getByRole('button', {
+          name: 'Recover Master Password',
+        })
+        .click();
+
+      await expect(page).toHaveURL(/\/login$/, {
+        timeout: 30_000,
+      });
+
+      captureRecoveryRequests = false;
+
+      await expect(
+        page.getByRole('heading', {
+          name: 'Sign in',
+        }),
+      ).toBeVisible();
+
+      await expect(
+        page.getByText('Master Password recovered successfully. Sign in again with your passkey.'),
+      ).toBeVisible();
+
+      /*
+       * Recovery must not have rewritten
+       * encrypted vault items.
+       */
+      expect(recoveryVaultMutations).toEqual([]);
+
+      /*
+       * Recovery session is revoked.
+       */
+      const recoverySessionAfter = await context.request.get('http://localhost:5173/api/v1/me');
+
+      expect(recoverySessionAfter.status()).toBe(401);
+
+      /*
+       * The other authenticated session must
+       * also be revoked account-wide.
+       */
+      const otherSessionAfterRecovery = await recoveryOtherContext.request.get(
+        'http://localhost:5173/api/v1/me',
+      );
+
+      expect(otherSessionAfterRecovery.status()).toBe(401);
+
+      /*
+       * Authenticate again after recovery.
+       */
+      await page
+        .getByRole('button', {
+          name: 'Sign in with passkey',
+        })
+        .click();
+
+      await expect(page).toHaveURL(/\/vault$/);
+
+      await expect(
+        page.getByRole('heading', {
+          name: 'Vault locked',
+        }),
+      ).toBeVisible();
+
+      /*
+       * Load the same Recovery Kit for normal
+       * vault unlock.
+       */
+      await page.getByLabel('Recovery Kit').setInputFiles(recoveryKitPath);
+
+      const recoveryUnlockButton = page.getByRole('button', {
+        name: 'Unlock vault',
+      });
+
+      await expect(recoveryUnlockButton).toBeVisible();
+
+      /*
+       * The Master Password that was valid
+       * immediately before recovery must now fail.
+       */
+      await page
+        .getByPlaceholder('Master Password', {
+          exact: true,
+        })
+        .fill(changedMasterPassword);
+
+      await recoveryUnlockButton.click();
+
+      await expect(page.getByRole('alert')).toBeVisible({
+        timeout: 30_000,
+      });
+
+      await expect(
+        page.getByRole('heading', {
+          name: 'Vault locked',
+        }),
+      ).toBeVisible();
+
+      /*
+       * Recovery Kit remains loaded after the
+       * failed local unwrap attempt.
+       *
+       * The recovered Master Password must now
+       * unlock the same account root key.
+       */
+      await page
+        .getByPlaceholder('Master Password', {
+          exact: true,
+        })
+        .fill(recoveredMasterPassword);
+
+      await recoveryUnlockButton.click();
+
+      await expect(
+        page.getByRole('heading', {
+          name: 'Vault unlocked',
+        }),
+      ).toBeVisible({
+        timeout: 30_000,
+      });
+
+      /*
+       * Existing item survived recovery without
+       * item-level re-encryption.
+       */
+      await expect(
+        page.getByText(updatedLogin.name, {
+          exact: true,
+        }),
+      ).toBeVisible({
+        timeout: 30_000,
+      });
+
+      await page
+        .getByRole('button', {
+          name: 'View',
+        })
+        .first()
+        .click();
+
+      await expect(
+        page.getByRole('heading', {
+          name: 'Decrypted login',
+        }),
+      ).toBeVisible();
+
+      await expect(
+        page
+          .getByText('Name:', {
+            exact: true,
+          })
+          .locator('..'),
+      ).toContainText(updatedLogin.name);
+
+      await expect(
+        page
+          .getByText('Username:', {
+            exact: true,
+          })
+          .locator('..'),
+      ).toContainText(updatedLogin.username);
+
+      await expect(
+        page.getByText(updatedLogin.url, {
+          exact: true,
+        }),
+      ).toBeVisible();
+
+      await expect(
+        page
+          .getByText('Notes:', {
+            exact: true,
+          })
+          .locator('..'),
+      ).toContainText(updatedLogin.notes);
+
+      await page
+        .getByRole('button', {
+          name: 'Show password',
+        })
+        .click();
+
+      await expect(
+        page.getByText(updatedLogin.password, {
+          exact: true,
+        }),
+      ).toBeVisible();
+    } finally {
+      await recoveryOtherContext.close();
+    }
 
     /*
      * Verify zero-knowledge transport boundary.
