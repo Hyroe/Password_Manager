@@ -1866,6 +1866,106 @@ test.describe('real passkey authentication', () => {
     }
 
     /*
+     * H4A — Final critical-path closure.
+     *
+     * H3C leaves us authenticated, unlocked
+     * and viewing the restored/decrypted item.
+     */
+    const protectedItemUrl = page.url();
+
+    expect(protectedItemUrl).toMatch(/\/vault\/items\/[^/]+$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault unlocked',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page.getByText(updatedLogin.password, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    /*
+     * Exercise the normal user-facing logout,
+     * not session-management revocation.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Sign out',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/login$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Sign in',
+      }),
+    ).toBeVisible();
+
+    await expect(page.getByText('Signed out successfully.')).toBeVisible();
+
+    /*
+     * Decrypted vault plaintext must disappear
+     * with the unlocked runtime.
+     */
+    await expect(
+      page.getByText(updatedLogin.password, {
+        exact: true,
+      }),
+    ).not.toBeVisible();
+
+    await expect(
+      page.getByText(updatedLogin.name, {
+        exact: true,
+      }),
+    ).not.toBeVisible();
+
+    /*
+     * Logout must revoke the authoritative
+     * opaque server session.
+     */
+    const sessionAfterLogout = await context.request.get('http://localhost:5173/api/v1/me');
+
+    expect(sessionAfterLogout.status()).toBe(401);
+
+    /*
+     * A reload must not resurrect authenticated
+     * or decrypted client state.
+     */
+    await page.reload();
+
+    await expect(page).toHaveURL(/\/login$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Sign in',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Even the previously valid deep item URL
+     * must now resolve back to login.
+     */
+    await page.goto(protectedItemUrl);
+
+    await expect(page).toHaveURL(/\/login$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Sign in',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault unlocked',
+      }),
+    ).not.toBeVisible();
+
+    /*
      * Verify zero-knowledge transport boundary.
      */
     const serializedVaultRequests = vaultRequestBodies.join('\n');
