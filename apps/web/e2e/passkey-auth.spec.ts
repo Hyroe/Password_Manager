@@ -643,6 +643,240 @@ test.describe('real passkey authentication', () => {
     ).toBeVisible();
 
     /*
+     * H2B — Search, delete, restore and reload.
+     */
+
+    /*
+     * Return from the routed item view to the
+     * vault list while keeping the same
+     * in-memory UnlockedVault instance.
+     */
+    await page
+      .getByRole('button', {
+        name: 'Back to vault',
+      })
+      .click();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    /*
+     * Client-side search must not trigger
+     * vault network traffic.
+     */
+    const searchInput = page.getByRole('searchbox');
+
+    await expect(searchInput).toBeVisible();
+
+    let captureSearchRequests = false;
+
+    const searchNetworkRequests: string[] = [];
+
+    page.on('request', (request) => {
+      if (captureSearchRequests && request.url().includes('/api/v1/vaults/')) {
+        searchNetworkRequests.push(`${request.method()} ${request.url()}`);
+      }
+    });
+
+    captureSearchRequests = true;
+
+    await searchInput.fill(updatedLogin.username);
+
+    /*
+     * Give React effects enough time to run.
+     * Search itself must remain purely local.
+     */
+    await page.waitForTimeout(300);
+
+    captureSearchRequests = false;
+
+    expect(searchNetworkRequests).toEqual([]);
+
+    /*
+     * The updated item is found from the
+     * locally decrypted search index.
+     */
+    await expect(
+      page.getByText(updatedLogin.name, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    /*
+     * A query with no match must distinguish
+     * "no search results" from an empty vault.
+     */
+    await searchInput.fill('definitely-no-e2e-login-match-9841');
+
+    await expect(page.getByText('No logins match your search.')).toBeVisible();
+
+    await searchInput.fill('');
+
+    await expect(
+      page.getByText(updatedLogin.name, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    /*
+     * DELETE
+     *
+     * Accept the deliberate destructive-action
+     * confirmation dialog.
+     */
+    page.once('dialog', async (dialog) => {
+      expect(dialog.type()).toBe('confirm');
+      await dialog.accept();
+    });
+
+    await page
+      .getByRole('button', {
+        name: 'Delete',
+      })
+      .first()
+      .click();
+
+    await expect(page.getByText('Login deleted.')).toBeVisible();
+
+    await expect(page.getByText('No saved logins yet.')).toBeVisible();
+
+    /*
+     * Deleted entries are tombstone metadata.
+     * Their decrypted LOGIN presentation must
+     * no longer remain in the active list.
+     */
+    await expect(
+      page.getByText(updatedLogin.name, {
+        exact: true,
+      }),
+    ).not.toBeVisible();
+
+    const restoreButton = page.getByRole('button', {
+      name: 'Restore',
+    });
+
+    await expect(restoreButton).toBeVisible();
+
+    /*
+     * RESTORE
+     */
+    await restoreButton.click();
+
+    await expect(page.getByText('Login restored.')).toBeVisible();
+
+    await expect(
+      page.getByText(updatedLogin.name, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page.getByRole('button', {
+        name: 'Restore',
+      }),
+    ).not.toBeVisible();
+
+    /*
+     * Open the restored item and prove the
+     * same revision still decrypts correctly.
+     */
+    await page
+      .getByRole('button', {
+        name: 'View',
+      })
+      .first()
+      .click();
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Decrypted login',
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Name:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.name);
+
+    await expect(
+      page
+        .getByText('Username:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.username);
+
+    /*
+     * Full reload destroys the client-side
+     * WASM key state.
+     */
+    await page.reload();
+
+    await expect(page).toHaveURL(/\/vault$/);
+
+    await expect(
+      page.getByRole('heading', {
+        name: 'Vault locked',
+      }),
+    ).toBeVisible();
+
+    /*
+     * Unlock again. bootstrapVaultSync()
+     * must rebuild local state from the
+     * encrypted server snapshot/change feed.
+     */
+    await unlockVault(page, recoveryKitPath, masterPassword);
+
+    await expect(
+      page.getByText(updatedLogin.name, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    /*
+     * Decrypt again after the completely new
+     * WASM unlock/runtime lifecycle.
+     */
+    await page
+      .getByRole('button', {
+        name: 'View',
+      })
+      .first()
+      .click();
+
+    await expect(
+      page
+        .getByText('Name:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.name);
+
+    await expect(
+      page
+        .getByText('Username:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.username);
+
+    await expect(
+      page.getByText(updatedLogin.url, {
+        exact: true,
+      }),
+    ).toBeVisible();
+
+    await expect(
+      page
+        .getByText('Notes:', {
+          exact: true,
+        })
+        .locator('..'),
+    ).toContainText(updatedLogin.notes);
+
+    /*
      * Verify zero-knowledge transport boundary.
      */
     const serializedVaultRequests = vaultRequestBodies.join('\n');
