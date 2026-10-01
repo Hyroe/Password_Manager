@@ -16,6 +16,7 @@ import { createPasskeyLoginRouter } from './modules/auth/passkeyLoginRoutes.js';
 import { createVaultItemRouter } from './modules/vault/vaultItemRoutes.js';
 
 import { createHttpSecurityHeaders, permissionsPolicy } from './security/httpSecurity.js';
+import { resolveTrustProxy } from './config/http.js';
 
 interface AppDependencies {
   emailSender?: EmailSender;
@@ -25,6 +26,8 @@ interface AppDependencies {
 
 export function createApp(dependencies: AppDependencies = {}) {
   const app = express();
+
+  app.set('trust proxy', resolveTrustProxy());
 
   app.disable('x-powered-by');
 
