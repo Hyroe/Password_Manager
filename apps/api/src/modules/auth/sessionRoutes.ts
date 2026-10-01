@@ -9,11 +9,14 @@ import {
 } from './sessionController.js';
 
 import { requireSession } from './sessionMiddleware.js';
+import { getCsrfToken } from './csrfController.js';
 
 export function createSessionRouter() {
   const router = Router();
 
   router.get('/me', requireSession, getMe);
+
+  router.get('/auth/csrf', requireSession, getCsrfToken);
 
   router.get('/sessions', requireSession, listSessions);
 

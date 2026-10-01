@@ -3,7 +3,7 @@ import {
   type PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser';
 
-import { apiRequest } from './api';
+import { apiRequest, clearCsrfToken } from './api';
 
 interface LoginOptionsResponse {
   challengeId: string;
@@ -38,7 +38,7 @@ export async function loginWithPasskey(): Promise<AuthenticatedSession> {
     optionsJSON: options.options,
   });
 
-  return apiRequest<AuthenticatedSession>('/api/v1/auth/passkeys/login/verify', {
+  const session = await apiRequest<AuthenticatedSession>('/api/v1/auth/passkeys/login/verify', {
     method: 'POST',
 
     body: JSON.stringify({
@@ -47,6 +47,14 @@ export async function loginWithPasskey(): Promise<AuthenticatedSession> {
       credential,
     }),
   });
+
+  /*
+   * A successful login establishes a new
+   * authoritative server session.
+   */
+  clearCsrfToken();
+
+  return session;
 }
 
 export async function getCurrentSession(): Promise<AuthenticatedSession> {
@@ -54,8 +62,17 @@ export async function getCurrentSession(): Promise<AuthenticatedSession> {
 }
 
 export async function logout(): Promise<void> {
-  await apiRequest<void>('/api/v1/auth/logout', {
-    method: 'POST',
-    body: JSON.stringify({}),
-  });
+  try {
+    await apiRequest<void>('/api/v1/auth/logout', {
+      method: 'POST',
+
+      body: JSON.stringify({}),
+    });
+  } finally {
+    /*
+     * Never retain a token belonging to a
+     * session that is being discarded.
+     */
+    clearCsrfToken();
+  }
 }
