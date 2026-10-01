@@ -15,6 +15,8 @@ import { createVaultUnlockRouter } from './modules/crypto/vaultUnlockRoutes.js';
 import { createPasskeyLoginRouter } from './modules/auth/passkeyLoginRoutes.js';
 import { createVaultItemRouter } from './modules/vault/vaultItemRoutes.js';
 
+import { createHttpSecurityHeaders, permissionsPolicy } from './security/httpSecurity.js';
+
 interface AppDependencies {
   emailSender?: EmailSender;
   webAuthnProvider?: WebAuthnProvider;
@@ -24,12 +26,16 @@ interface AppDependencies {
 export function createApp(dependencies: AppDependencies = {}) {
   const app = express();
 
+  app.disable('x-powered-by');
+
+  app.use(createHttpSecurityHeaders());
+
+  app.use(permissionsPolicy);
+
   const emailSender = dependencies.emailSender ?? noopEmailSender;
   const webAuthnProvider = dependencies.webAuthnProvider ?? simpleWebAuthnProvider;
   const passkeyAuthenticationProvider =
     dependencies.passkeyAuthenticationProvider ?? simplePasskeyAuthenticationProvider;
-
-  app.disable('x-powered-by');
 
   app.use(
     express.json({
