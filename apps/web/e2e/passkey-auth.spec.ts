@@ -8,6 +8,10 @@ interface VerificationMessageResponse {
   token: string;
 }
 
+interface CsrfTokenResponse {
+  csrfToken: string;
+}
+
 async function unlockVault(
   page: Page,
   recoveryKitPath: string,
@@ -335,6 +339,156 @@ test.describe('real passkey authentication', () => {
     expect(sessionCookie).toBeDefined();
 
     expect(sessionCookie?.httpOnly).toBe(true);
+
+    /*
+     * M1.13B4 — CSRF / Origin adversarial validation.
+     *
+     * A real authenticated browser session now exists.
+     * Prove that safe requests remain usable while
+     * authenticated mutations fail closed.
+     */
+
+    const safeGetWithoutCsrf = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/me', {
+        method: 'GET',
+        credentials: 'same-origin',
+      });
+
+      return response.status;
+    });
+
+    expect(safeGetWithoutCsrf).toBe(200);
+
+    /*
+     * Browser mutation without the synchronizer token.
+     */
+    const missingCsrf = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+
+        headers: {
+          'Content-Type': 'application/json',
+        },
+
+        body: JSON.stringify({}),
+      });
+
+      const body = (await response.json()) as {
+        error?: {
+          code?: string;
+        };
+      };
+
+      return {
+        status: response.status,
+        code: body.error?.code,
+      };
+    });
+
+    expect(missingCsrf).toEqual({
+      status: 403,
+      code: 'INVALID_CSRF',
+    });
+
+    /*
+     * A random attacker-controlled token must fail too.
+     */
+    const forgedCsrf = await page.evaluate(async () => {
+      const response = await fetch('/api/v1/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': 'forged-e2e-csrf-token',
+        },
+
+        body: JSON.stringify({}),
+      });
+
+      const body = (await response.json()) as {
+        error?: {
+          code?: string;
+        };
+      };
+
+      return {
+        status: response.status,
+        code: body.error?.code,
+      };
+    });
+
+    expect(forgedCsrf).toEqual({
+      status: 403,
+      code: 'INVALID_CSRF',
+    });
+
+    /*
+     * Obtain the genuine token for this real session.
+     */
+    const initialCsrfResponse = await context.request.get('http://localhost:5173/api/v1/auth/csrf');
+
+    expect(initialCsrfResponse.status()).toBe(200);
+
+    const { csrfToken: initialCsrfToken } = (await initialCsrfResponse.json()) as CsrfTokenResponse;
+
+    expect(initialCsrfToken).toBeTruthy();
+
+    /*
+     * Even a valid session + valid CSRF token must fail
+     * when the Origin is not trusted.
+     */
+    const forgedOriginResponse = await context.request.post(
+      'http://localhost:5173/api/v1/auth/logout',
+      {
+        headers: {
+          Origin: 'https://attacker.example',
+          'X-CSRF-Token': initialCsrfToken,
+        },
+      },
+    );
+
+    expect(forgedOriginResponse.status()).toBe(403);
+
+    const forgedOriginBody = (await forgedOriginResponse.json()) as {
+      error?: {
+        code?: string;
+      };
+    };
+
+    expect(forgedOriginBody.error?.code).toBe('FORBIDDEN');
+
+    /*
+     * None of the rejected attacks may revoke or
+     * otherwise damage the authenticated session.
+     */
+    const sessionAfterRejectedAttacks = await context.request.get(
+      'http://localhost:5173/api/v1/me',
+    );
+
+    expect(sessionAfterRejectedAttacks.status()).toBe(200);
+
+    /*
+     * Complete the matrix with a valid authenticated
+     * mutation. There are no other sessions yet, so
+     * revoke-others has no destructive side effect.
+     */
+    const validCsrfMutation = await context.request.post(
+      'http://localhost:5173/api/v1/sessions/revoke-others',
+      {
+        headers: {
+          Origin: 'http://localhost:5173',
+          'X-CSRF-Token': initialCsrfToken,
+        },
+      },
+    );
+
+    expect(validCsrfMutation.ok()).toBe(true);
+
+    const sessionAfterValidMutation = await context.request.get('http://localhost:5173/api/v1/me');
+
+    expect(sessionAfterValidMutation.status()).toBe(200);
 
     /*
      * Server authentication survives a
@@ -1170,6 +1324,77 @@ test.describe('real passkey authentication', () => {
       );
 
       expect(secondSessionBeforeRevocation.status()).toBe(200);
+
+      /*
+       * M1.13B4 — CSRF tokens must be bound to the
+       * authoritative server session.
+       *
+       * Primary context = session B.
+       * Secondary context = preserved session A.
+       */
+
+      const primarySessionCsrfResponse = await context.request.get(
+        'http://localhost:5173/api/v1/auth/csrf',
+      );
+
+      expect(primarySessionCsrfResponse.status()).toBe(200);
+
+      const { csrfToken: primarySessionCsrfToken } =
+        (await primarySessionCsrfResponse.json()) as CsrfTokenResponse;
+
+      const secondarySessionCsrfResponse = await secondContext.request.get(
+        'http://localhost:5173/api/v1/auth/csrf',
+      );
+
+      expect(secondarySessionCsrfResponse.status()).toBe(200);
+
+      const { csrfToken: secondarySessionCsrfToken } =
+        (await secondarySessionCsrfResponse.json()) as CsrfTokenResponse;
+
+      expect(secondarySessionCsrfToken).not.toBe(primarySessionCsrfToken);
+
+      /*
+       * Present session A's CSRF token together with
+       * session B's cookie.
+       *
+       * Origin is deliberately valid so the rejection
+       * specifically proves session/token binding.
+       */
+      const crossSessionCsrfResponse = await context.request.post(
+        'http://localhost:5173/api/v1/auth/logout',
+        {
+          headers: {
+            Origin: 'http://localhost:5173',
+
+            'X-CSRF-Token': secondarySessionCsrfToken,
+          },
+        },
+      );
+
+      expect(crossSessionCsrfResponse.status()).toBe(403);
+
+      const crossSessionCsrfBody = (await crossSessionCsrfResponse.json()) as {
+        error?: {
+          code?: string;
+        };
+      };
+
+      expect(crossSessionCsrfBody.error?.code).toBe('INVALID_CSRF');
+
+      /*
+       * Rejection must leave both sessions intact.
+       */
+      const primaryAfterCrossSessionAttempt = await context.request.get(
+        'http://localhost:5173/api/v1/me',
+      );
+
+      expect(primaryAfterCrossSessionAttempt.status()).toBe(200);
+
+      const secondaryAfterCrossSessionAttempt = await secondContext.request.get(
+        'http://localhost:5173/api/v1/me',
+      );
+
+      expect(secondaryAfterCrossSessionAttempt.status()).toBe(200);
 
       /*
        * Primary session B manages the account.
