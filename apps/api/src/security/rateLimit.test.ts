@@ -3,7 +3,11 @@ import request from 'supertest';
 
 import { describe, expect, it } from 'vitest';
 
-import { createRateLimiter, type RateLimitPolicy } from './rateLimit.js';
+import {
+  createAuthenticatedUserRateLimiter,
+  createRateLimiter,
+  type RateLimitPolicy,
+} from './rateLimit.js';
 
 const testPolicy: RateLimitPolicy = {
   identifier: 'test-rate-limit',
@@ -80,5 +84,115 @@ describe('rate-limit infrastructure', () => {
     const response = await request(app).get('/limited').expect(429);
 
     expect(response.headers['retry-after']).toBeDefined();
+  });
+
+  it('isolates authenticated rate-limit buckets by user', async () => {
+    const app = express();
+
+    const limiter = createAuthenticatedUserRateLimiter({
+      identifier: 'authenticated-test',
+
+      windowMs: 60 * 1000,
+
+      limit: 2,
+    });
+
+    type AuthRequest = express.Request & {
+      auth?: {
+        sessionId: string;
+        userId: string;
+        email: string;
+        absoluteExpiresAt: Date;
+      };
+    };
+
+    app.use((req: AuthRequest, _res, next) => {
+      const userId = req.get('x-test-user-id');
+
+      if (userId) {
+        req.auth = {
+          sessionId: `session-${userId}`,
+
+          userId,
+
+          email: `${userId}@example.com`,
+
+          absoluteExpiresAt: new Date(Date.now() + 60_000),
+        };
+      }
+
+      next();
+    });
+
+    app.post('/limited', limiter, (_req, res) => {
+      res.sendStatus(204);
+    });
+
+    await request(app).post('/limited').set('X-Test-User-Id', 'user-a').expect(204);
+
+    await request(app).post('/limited').set('X-Test-User-Id', 'user-a').expect(204);
+
+    await request(app).post('/limited').set('X-Test-User-Id', 'user-a').expect(429);
+
+    /*
+     * User B has an independent bucket even
+     * when requests originate from the same IP.
+     */
+    await request(app).post('/limited').set('X-Test-User-Id', 'user-b').expect(204);
+  });
+
+  it('isolates authenticated rate-limit buckets by user', async () => {
+    const app = express();
+
+    const limiter = createAuthenticatedUserRateLimiter({
+      identifier: 'authenticated-test',
+
+      windowMs: 60 * 1000,
+
+      limit: 2,
+    });
+
+    type AuthRequest = express.Request & {
+      auth?: {
+        sessionId: string;
+        userId: string;
+        email: string;
+        absoluteExpiresAt: Date;
+      };
+    };
+
+    app.use((req: AuthRequest, _res, next) => {
+      const userId = req.get('x-test-user-id');
+
+      if (userId) {
+        req.auth = {
+          sessionId: `session-${userId}`,
+
+          userId,
+
+          email: `${userId}@example.com`,
+
+          absoluteExpiresAt: new Date(Date.now() + 60_000),
+        };
+      }
+
+      next();
+    });
+
+    app.post('/limited', limiter, (_req, res) => {
+      res.sendStatus(204);
+    });
+
+    await request(app).post('/limited').set('X-Test-User-Id', 'user-a').expect(204);
+
+    await request(app).post('/limited').set('X-Test-User-Id', 'user-a').expect(204);
+
+    await request(app).post('/limited').set('X-Test-User-Id', 'user-a').expect(429);
+
+    /*
+     * User B has an independent bucket even
+     * when requests originate from the same IP.
+     */
+    await request(app).post('/limited').set('X-Test-User-Id', 'user-b').expect(204);
   });
 });

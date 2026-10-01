@@ -1,10 +1,14 @@
 import { rateLimit, type Store } from 'express-rate-limit';
 
+import type { Request, RequestHandler } from 'express';
+
 export interface RateLimitPolicy {
   identifier: string;
 
   windowMs: number;
   limit: number;
+
+  keyGenerator?: (req: Request) => string;
 }
 
 export type RateLimitStoreFactory = (identifier: string) => Store | undefined;
@@ -25,27 +29,25 @@ export function createRateLimiter(policy: RateLimitPolicy, storeFactory?: RateLi
 
     identifier: policy.identifier,
 
-    /*
-     * Use the standardized combined
-     * RateLimit header.
-     */
     standardHeaders: 'draft-8' as const,
 
     legacyHeaders: false,
 
-    /*
-     * Do not silently disable protection
-     * when an external store fails.
-     */
     passOnStoreError: false,
 
-    /*
-     * Explicitly freeze the IPv6 grouping
-     * behavior used by the default IP key.
-     */
-    ipv6Subnet: 56,
-
     message: RATE_LIMITED_RESPONSE,
+
+    ...(policy.keyGenerator
+      ? {
+          keyGenerator: policy.keyGenerator,
+        }
+      : {
+          /*
+           * Only applies when the default
+           * IP-based key generator is used.
+           */
+          ipv6Subnet: 56,
+        }),
   };
 
   if (store) {
@@ -63,4 +65,33 @@ export function createRateLimiter(policy: RateLimitPolicy, storeFactory?: RateLi
    * without changing route policies.
    */
   return rateLimit(baseOptions);
+}
+
+export function createAuthenticatedUserRateLimiter(
+  policy: Omit<RateLimitPolicy, 'keyGenerator'>,
+  storeFactory?: RateLimitStoreFactory,
+): RequestHandler {
+  return createRateLimiter(
+    {
+      ...policy,
+
+      keyGenerator(req) {
+        /*
+         * Authenticated rate limiters must
+         * be mounted after requireSession.
+         *
+         * If a route is ever misconfigured,
+         * use one shared fail-closed bucket
+         * instead of bypassing protection.
+         */
+        if (!req.auth) {
+          return 'missing-auth';
+        }
+
+        return `user:${req.auth.userId}`;
+      },
+    },
+
+    storeFactory,
+  );
 }

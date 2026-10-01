@@ -23,6 +23,7 @@ import { requireCsrfForBrowserMutation } from './modules/auth/csrfMiddleware.js'
 import { createAuthRateLimiters } from './security/authRateLimits.js';
 
 import type { RateLimitStoreFactory } from './security/rateLimit.js';
+import { createSensitiveRateLimiters } from './security/sensitiveRateLimits.js';
 
 interface AppDependencies {
   emailSender?: EmailSender;
@@ -53,6 +54,7 @@ export function createApp(dependencies: AppDependencies = {}) {
     dependencies.passkeyAuthenticationProvider ?? simplePasskeyAuthenticationProvider;
 
   const authRateLimits = createAuthRateLimiters(dependencies.rateLimitStoreFactory);
+  const sensitiveRateLimits = createSensitiveRateLimiters(dependencies.rateLimitStoreFactory);
 
   app.use(
     express.json({
@@ -77,9 +79,9 @@ export function createApp(dependencies: AppDependencies = {}) {
     createPasskeyLoginRouter(passkeyAuthenticationProvider, authRateLimits),
   );
 
-  app.use('/api/v1', createSessionRouter());
+  app.use('/api/v1', createSessionRouter(sensitiveRateLimits));
 
-  app.use('/api/v1/crypto', createVaultUnlockRouter());
+  app.use('/api/v1/crypto', createVaultUnlockRouter(sensitiveRateLimits));
 
   app.use('/api/v1/vaults', createVaultItemRouter());
 
