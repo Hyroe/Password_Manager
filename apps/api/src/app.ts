@@ -17,6 +17,7 @@ import { createVaultItemRouter } from './modules/vault/vaultItemRoutes.js';
 
 import { createHttpSecurityHeaders, permissionsPolicy } from './security/httpSecurity.js';
 import { resolveTrustProxy } from './config/http.js';
+import { createOriginProtection } from './security/originProtection.js';
 
 interface AppDependencies {
   emailSender?: EmailSender;
@@ -34,6 +35,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use(createHttpSecurityHeaders());
 
   app.use(permissionsPolicy);
+
+  app.use(createOriginProtection());
 
   const emailSender = dependencies.emailSender ?? noopEmailSender;
   const webAuthnProvider = dependencies.webAuthnProvider ?? simpleWebAuthnProvider;
