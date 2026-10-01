@@ -58,7 +58,37 @@ test.describe('real passkey authentication', () => {
      */
     await context.credentials.install();
 
-    await page.goto('/register');
+    const initialDocumentResponse = await page.goto('/register');
+
+    expect(initialDocumentResponse).not.toBeNull();
+
+    const documentHeaders = initialDocumentResponse?.headers();
+
+    expect(documentHeaders?.['x-content-type-options']).toBe('nosniff');
+
+    expect(documentHeaders?.['x-frame-options']).toBe('DENY');
+
+    expect(documentHeaders?.['referrer-policy']).toBe('no-referrer');
+
+    expect(documentHeaders?.['cross-origin-opener-policy']).toBe('same-origin');
+
+    expect(documentHeaders?.['cross-origin-resource-policy']).toBe('same-origin');
+
+    expect(documentHeaders?.['permissions-policy']).toBe(
+      'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
+    );
+
+    const documentCsp = documentHeaders?.['content-security-policy'];
+
+    expect(documentCsp).toContain("default-src 'none'");
+
+    expect(documentCsp).toContain("script-src 'self' 'wasm-unsafe-eval'");
+
+    expect(documentCsp).toContain("frame-ancestors 'none'");
+
+    expect(documentCsp).not.toContain('upgrade-insecure-requests');
+
+    expect(documentHeaders?.['strict-transport-security']).toBeUndefined();
 
     await expect(
       page.getByRole('heading', {

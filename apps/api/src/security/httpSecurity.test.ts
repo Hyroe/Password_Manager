@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../app.js';
 
@@ -44,5 +44,24 @@ describe('HTTP security headers', () => {
     expect(csp).not.toContain('upgrade-insecure-requests');
 
     expect(response.headers['strict-transport-security']).toBeUndefined();
+  });
+  it('enables HTTPS-oriented protections in production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+
+    const response = await request(createApp()).get('/api/v1/health').expect(200);
+
+    const csp = response.headers['content-security-policy'];
+
+    expect(csp).toContain('upgrade-insecure-requests');
+
+    expect(response.headers['strict-transport-security']).toContain('max-age=31536000');
+
+    /*
+     * We intentionally have not committed
+     * to includeSubDomains or preload yet.
+     */
+    expect(response.headers['strict-transport-security']).not.toContain('includeSubDomains');
+
+    expect(response.headers['strict-transport-security']).not.toContain('preload');
   });
 });
