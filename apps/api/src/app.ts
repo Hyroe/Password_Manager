@@ -20,10 +20,16 @@ import { resolveTrustProxy } from './config/http.js';
 import { createOriginProtection } from './security/originProtection.js';
 import { requireCsrfForBrowserMutation } from './modules/auth/csrfMiddleware.js';
 
+import { createAuthRateLimiters } from './security/authRateLimits.js';
+
+import type { RateLimitStoreFactory } from './security/rateLimit.js';
+
 interface AppDependencies {
   emailSender?: EmailSender;
   webAuthnProvider?: WebAuthnProvider;
   passkeyAuthenticationProvider?: PasskeyAuthenticationProvider;
+
+  rateLimitStoreFactory?: RateLimitStoreFactory;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
@@ -46,6 +52,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   const passkeyAuthenticationProvider =
     dependencies.passkeyAuthenticationProvider ?? simplePasskeyAuthenticationProvider;
 
+  const authRateLimits = createAuthRateLimiters(dependencies.rateLimitStoreFactory);
+
   app.use(
     express.json({
       limit: '2mb',
@@ -58,13 +66,16 @@ export function createApp(dependencies: AppDependencies = {}) {
     });
   });
 
-  app.use('/api/v1/accounts', createAccountRouter(emailSender));
+  app.use('/api/v1/accounts', createAccountRouter(emailSender, authRateLimits));
 
-  app.use('/api/v1/auth/passkeys', createPasskeyRouter(webAuthnProvider));
+  app.use('/api/v1/auth/passkeys', createPasskeyRouter(webAuthnProvider, authRateLimits));
 
-  app.use('/api/v1/accounts/crypto', createCryptoBootstrapRouter());
+  app.use('/api/v1/accounts/crypto', createCryptoBootstrapRouter(authRateLimits));
 
-  app.use('/api/v1/auth/passkeys', createPasskeyLoginRouter(passkeyAuthenticationProvider));
+  app.use(
+    '/api/v1/auth/passkeys',
+    createPasskeyLoginRouter(passkeyAuthenticationProvider, authRateLimits),
+  );
 
   app.use('/api/v1', createSessionRouter());
 
