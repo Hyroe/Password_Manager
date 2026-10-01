@@ -3,7 +3,7 @@ import {
   type PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser';
 
-import { apiRequest, clearCsrfToken } from './api';
+import { apiRequest, clearCsrfToken, getCsrfToken } from './api';
 
 interface LoginOptionsResponse {
   challengeId: string;
@@ -54,11 +54,24 @@ export async function loginWithPasskey(): Promise<AuthenticatedSession> {
    */
   clearCsrfToken();
 
+  await getCsrfToken();
+
   return session;
 }
 
 export async function getCurrentSession(): Promise<AuthenticatedSession> {
-  return apiRequest<AuthenticatedSession>('/api/v1/me');
+  const session = await apiRequest<AuthenticatedSession>('/api/v1/me');
+
+  /*
+   * A page reload destroys frontend memory,
+   * so re-establish the CSRF context for the
+   * still-valid HttpOnly session.
+   */
+  clearCsrfToken();
+
+  await getCsrfToken();
+
+  return session;
 }
 
 export async function logout(): Promise<void> {

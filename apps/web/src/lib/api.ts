@@ -13,6 +13,8 @@ let cachedCsrfToken: string | null = null;
 
 let csrfTokenRequest: Promise<string> | null = null;
 
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
@@ -95,6 +97,12 @@ export async function getCsrfToken(): Promise<string> {
 export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
 
+  const method = (init?.method ?? 'GET').toUpperCase();
+
+  if (!SAFE_METHODS.has(method) && cachedCsrfToken && !headers.has('X-CSRF-Token')) {
+    headers.set('X-CSRF-Token', cachedCsrfToken);
+  }
+
   if (init?.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
@@ -112,11 +120,15 @@ export async function apiRequest<T>(url: string, init?: RequestInit): Promise<T>
   const body = (await response.json().catch(() => undefined)) as ApiErrorResponse | T | undefined;
 
   if (!response.ok) {
+    const error = body as ApiErrorResponse | undefined;
+
     if (response.status === 401) {
       clearCsrfToken();
     }
 
-    const error = body as ApiErrorResponse | undefined;
+    if (response.status === 403 && error?.error?.code === 'INVALID_CSRF') {
+      clearCsrfToken();
+    }
 
     throw new ApiError(
       error?.error?.message ?? `Request failed with status ${response.status}`,

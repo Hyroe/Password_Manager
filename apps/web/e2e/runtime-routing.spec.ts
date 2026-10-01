@@ -35,6 +35,16 @@ async function mockAuthenticatedLocked(page: Page): Promise<void> {
     });
   });
 
+  await page.route('**/api/v1/auth/csrf', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        csrfToken: 'e2e-csrf-token',
+      }),
+    });
+  });
+
   await page.route('**/api/v1/sessions', async (route) => {
     if (route.request().method() !== 'GET') {
       await route.fallback();
