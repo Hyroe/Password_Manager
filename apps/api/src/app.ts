@@ -28,6 +28,13 @@ import { createSensitiveRateLimiters } from './security/sensitiveRateLimits.js';
 import { getEnvironment } from './config/env.js';
 import { assertRuntimeDependencies } from './config/startup.js';
 import { createRequestIdMiddleware } from './observability/requestId.js';
+import {
+  consoleStructuredLogger,
+  noopStructuredLogger,
+  type StructuredLogger,
+} from './observability/logger.js';
+
+import { createHttpRequestLoggingMiddleware } from './observability/httpRequestLogging.js';
 
 interface AppDependencies {
   emailSender?: EmailSender;
@@ -35,12 +42,18 @@ interface AppDependencies {
   passkeyAuthenticationProvider?: PasskeyAuthenticationProvider;
 
   rateLimitStoreFactory?: RateLimitStoreFactory;
+
+  logger?: StructuredLogger;
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
   const environment = getEnvironment();
 
   const emailSender = dependencies.emailSender ?? noopEmailSender;
+
+  const logger =
+    dependencies.logger ??
+    (environment.NODE_ENV === 'test' ? noopStructuredLogger : consoleStructuredLogger);
 
   assertRuntimeDependencies(environment, {
     emailSender,
@@ -53,6 +66,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.disable('x-powered-by');
 
   app.use(createRequestIdMiddleware());
+
+  app.use(createHttpRequestLoggingMiddleware(logger));
 
   app.use(createHttpSecurityHeaders());
 
