@@ -18,6 +18,8 @@ import { createVaultListView } from './lib/vaultList';
 
 import { AppShell } from './components/layout/AppShell';
 import { AuthShell } from './components/layout/AuthShell';
+import { AuthCard } from './components/auth/AuthCard';
+import { RegistrationProgress } from './components/auth/RegistrationProgress';
 
 import {
   browserSupportsWebAuthn,
@@ -2914,6 +2916,20 @@ export default function App() {
 
   const vaultNavigationActive = isVaultRoute || isVaultItemRoute;
 
+  const registrationStep = completedAccount
+    ? 6
+    : bootstrapOptions && recoveryKitDownloaded
+      ? 6
+      : bootstrapOptions
+        ? 5
+        : bootstrapToken
+          ? 4
+          : registrationToken
+            ? 3
+            : registrationId
+              ? 2
+              : 1;
+
   return (
     <main className={`app-root ${authenticated ? 'app-root--workspace' : ''}`}>
       {!authenticated && (
@@ -2941,24 +2957,38 @@ export default function App() {
           {runtimeState === 'SIGNED_OUT' && (
             <>
               {isLoginRoute && (
-                <section>
-                  <h2>Sign in</h2>
+                <AuthCard
+                  title="Welcome back"
+                  description="Sign in with your passkey to continue to your private vault."
+                >
+                  <div className="auth-security-note">
+                    <span className="auth-security-note__icon" aria-hidden="true">
+                      ◇
+                    </span>
 
-                  <p>Authenticate with your passkey.</p>
+                    <div>
+                      <strong>Passwordless authentication</strong>
+                      <p>
+                        Your passkey authenticates your account without sending a password to Rory.
+                      </p>
+                    </div>
+                  </div>
 
                   <button
+                    className="button-primary button-full"
                     type="button"
                     disabled={loading || !webAuthnSupported}
                     onClick={handlePasskeyLogin}
                   >
-                    Sign in with passkey
+                    {loading ? 'Signing in…' : 'Sign in with passkey'}
                   </button>
 
-                  <hr />
-
-                  <p>Need an account?</p>
+                  <div className="auth-divider">
+                    <span>New to Rory?</span>
+                  </div>
 
                   <button
+                    className="button-secondary button-full"
                     type="button"
                     disabled={loading}
                     onClick={() => {
@@ -2967,34 +2997,43 @@ export default function App() {
                   >
                     Create account
                   </button>
-                </section>
+                </AuthCard>
               )}
 
               {isRegisterRoute && (
                 <>
+                  <RegistrationProgress currentStep={registrationStep} />
                   {!registrationId && !completedAccount && (
-                    <section>
-                      <h2>Create account</h2>
-
-                      <input
-                        type="email"
-                        value={email}
-                        placeholder="you@example.com"
-                        autoComplete="email"
-                        onChange={(event) => setEmail(event.target.value)}
-                      />
+                    <AuthCard
+                      title="Create your vault"
+                      description="Start with the email address associated with your Rory account."
+                    >
+                      <label>
+                        Email address
+                        <input
+                          type="email"
+                          value={email}
+                          placeholder="you@example.com"
+                          autoComplete="email"
+                          onChange={(event) => setEmail(event.target.value)}
+                        />
+                      </label>
 
                       <button
+                        className="button-primary button-full"
                         type="button"
                         disabled={loading || !email}
                         onClick={startAccountRegistration}
                       >
-                        Start registration
+                        {loading ? 'Starting…' : 'Continue'}
                       </button>
 
-                      <hr />
+                      <div className="auth-divider">
+                        <span>Already have an account?</span>
+                      </div>
 
                       <button
+                        className="button-secondary button-full"
                         type="button"
                         disabled={loading}
                         onClick={() => {
@@ -3003,104 +3042,210 @@ export default function App() {
                       >
                         Sign in instead
                       </button>
-                    </section>
+                    </AuthCard>
                   )}
 
                   {registrationId && !registrationToken && !bootstrapToken && !completedAccount && (
-                    <section>
-                      <h2>Verify email</h2>
+                    <AuthCard
+                      title="Verify your email"
+                      description="Confirm that this email address belongs to you."
+                    >
+                      <div className="auth-info-box">
+                        <strong>Development verification</strong>
+                        <p>Copy the local verification token from the API terminal.</p>
+                      </div>
 
-                      <p>Copy the local verification token from the API terminal.</p>
-
-                      <input
-                        type="text"
-                        value={verificationToken}
-                        placeholder="Verification token"
-                        onChange={(event) => setVerificationToken(event.target.value)}
-                      />
+                      <label>
+                        Verification token
+                        <input
+                          type="text"
+                          value={verificationToken}
+                          placeholder="Enter verification token"
+                          autoComplete="off"
+                          onChange={(event) => setVerificationToken(event.target.value)}
+                        />
+                      </label>
 
                       <button
+                        className="button-primary button-full"
                         type="button"
                         disabled={loading || !verificationToken}
                         onClick={verifyEmail}
                       >
-                        Verify email
+                        {loading ? 'Verifying…' : 'Verify email'}
                       </button>
-                    </section>
+                    </AuthCard>
                   )}
 
                   {registrationToken && !bootstrapToken && !completedAccount && (
-                    <section>
-                      <h2>Create passkey</h2>
+                    <AuthCard
+                      title="Create your passkey"
+                      description="Your passkey will be used to authenticate securely when you sign in."
+                    >
+                      <div className="passkey-illustration" aria-hidden="true">
+                        <span>◇</span>
+                      </div>
+
+                      <div className="auth-feature-list">
+                        <div>
+                          <strong>No account password to remember</strong>
+                          <span>Authentication is handled by your device.</span>
+                        </div>
+
+                        <div>
+                          <strong>Phishing resistant</strong>
+                          <span>Your passkey is bound to Rory's authentication origin.</span>
+                        </div>
+                      </div>
 
                       <button
+                        className="button-primary button-full"
                         type="button"
                         disabled={loading || !webAuthnSupported}
                         onClick={registerPasskey}
                       >
-                        Create passkey
+                        {loading ? 'Creating passkey…' : 'Create passkey'}
                       </button>
-                    </section>
+                    </AuthCard>
                   )}
 
                   {bootstrapToken && !bootstrapOptions && !completedAccount && (
-                    <section>
-                      <h2>Protect your vault</h2>
+                    <AuthCard
+                      title="Protect your vault"
+                      description="Create the Master Password that protects your encryption keys."
+                    >
+                      <div className="auth-security-callout">
+                        <strong>Your Master Password stays on this device</strong>
+                        <p>
+                          Rory uses it locally to derive cryptographic material. It is not sent to
+                          the server.
+                        </p>
+                      </div>
 
-                      <p>Your Master Password never leaves this browser.</p>
+                      <label>
+                        Master Password
+                        <input
+                          ref={masterPasswordRef}
+                          type="password"
+                          placeholder="At least 12 characters"
+                          autoComplete="new-password"
+                        />
+                      </label>
 
-                      <input
-                        ref={masterPasswordRef}
-                        type="password"
-                        placeholder="Master Password"
-                        autoComplete="new-password"
-                      />
+                      <label>
+                        Confirm Master Password
+                        <input
+                          ref={confirmMasterPasswordRef}
+                          type="password"
+                          placeholder="Enter it again"
+                          autoComplete="new-password"
+                        />
+                      </label>
 
-                      <input
-                        ref={confirmMasterPasswordRef}
-                        type="password"
-                        placeholder="Confirm Master Password"
-                        autoComplete="new-password"
-                      />
+                      <p className="auth-field-hint">
+                        Use at least 12 characters and choose something unique to Rory.
+                      </p>
 
-                      <button type="button" disabled={loading} onClick={prepareCryptoBootstrap}>
-                        Create vault keys
+                      <button
+                        className="button-primary button-full"
+                        type="button"
+                        disabled={loading}
+                        onClick={prepareCryptoBootstrap}
+                      >
+                        {loading ? 'Creating vault keys…' : 'Create vault keys'}
                       </button>
-                    </section>
+                    </AuthCard>
                   )}
 
                   {bootstrapOptions && !recoveryKitDownloaded && !completedAccount && (
-                    <section>
-                      <h2>Save Recovery Kit</h2>
+                    <AuthCard
+                      title="Save your Recovery Kit"
+                      description="Your Recovery Kit is critical recovery material for your encrypted vault."
+                    >
+                      <div className="recovery-warning">
+                        <span className="recovery-warning__icon" aria-hidden="true">
+                          !
+                        </span>
 
-                      <p>Store it securely and separately from your Master Password.</p>
+                        <div>
+                          <strong>Store this somewhere safe</strong>
+                          <p>
+                            Keep the Recovery Kit separate from your Master Password. Anyone with
+                            access to both may be able to recover your vault.
+                          </p>
+                        </div>
+                      </div>
 
-                      <button type="button" disabled={loading} onClick={saveRecoveryKit}>
+                      <button
+                        className="button-primary button-full"
+                        type="button"
+                        disabled={loading}
+                        onClick={saveRecoveryKit}
+                      >
                         Download Recovery Kit
                       </button>
-                    </section>
+
+                      <p className="auth-field-hint">
+                        Rory does not need to upload the Recovery Kit in order to save it.
+                      </p>
+                    </AuthCard>
                   )}
 
                   {bootstrapOptions && recoveryKitDownloaded && !completedAccount && (
-                    <section>
-                      <h2>Activate account</h2>
+                    <AuthCard
+                      title="Your vault is ready"
+                      description="The cryptographic setup is complete. Activate your Rory account to finish."
+                    >
+                      <div className="setup-summary">
+                        <div>
+                          <span className="setup-summary__check">✓</span>
+                          <span>Email verified</span>
+                        </div>
 
-                      <button type="button" disabled={loading} onClick={activateAccount}>
-                        Activate account
+                        <div>
+                          <span className="setup-summary__check">✓</span>
+                          <span>Passkey configured</span>
+                        </div>
+
+                        <div>
+                          <span className="setup-summary__check">✓</span>
+                          <span>Vault keys created locally</span>
+                        </div>
+
+                        <div>
+                          <span className="setup-summary__check">✓</span>
+                          <span>Recovery Kit saved</span>
+                        </div>
+                      </div>
+
+                      <button
+                        className="button-primary button-full"
+                        type="button"
+                        disabled={loading}
+                        onClick={activateAccount}
+                      >
+                        {loading ? 'Activating…' : 'Activate Rory'}
                       </button>
-                    </section>
+                    </AuthCard>
                   )}
 
                   {completedAccount && (
-                    <section>
-                      <h2>Account ready</h2>
+                    <AuthCard
+                      title="Welcome to Rory"
+                      description="Your encrypted personal vault has been created successfully."
+                    >
+                      <div className="account-ready-mark" aria-hidden="true">
+                        ✓
+                      </div>
 
-                      <p>Your encrypted personal vault has been created.</p>
-
-                      <button type="button" onClick={finishOnboarding}>
+                      <button
+                        className="button-primary button-full"
+                        type="button"
+                        onClick={finishOnboarding}
+                      >
                         Continue to sign in
                       </button>
-                    </section>
+                    </AuthCard>
                   )}
                 </>
               )}
