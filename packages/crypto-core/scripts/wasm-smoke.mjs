@@ -13,7 +13,7 @@ const {
   create_account_bootstrap,
   unlock_personal_vault,
   encrypt_login_item,
-decrypt_login_item,
+  decrypt_login_item,
 } = require('../pkg-node/pm_crypto_core.js');
 
 function equalBytes(left, right) {
@@ -30,17 +30,11 @@ const accountSecret = generate_account_secret();
 const salt = generate_kdf_salt();
 const ark = generate_root_key();
 
-const mpk = derive_master_password_key(
-  'correct horse battery staple',
-  accountSecret,
-  salt,
-);
+const mpk = derive_master_password_key('correct horse battery staple', accountSecret, salt);
 
 const mkek = derive_master_key_encryption_key(mpk);
 
-const aad = encoder.encode(
-  'pm:v1:ark:wasm-smoke-test:key-version:1',
-);
+const aad = encoder.encode('pm:v1:ark:wasm-smoke-test:key-version:1');
 
 const envelope = wrap_key(mkek, ark, aad);
 const recoveredArk = unwrap_key(mkek, envelope, aad);
@@ -60,9 +54,7 @@ console.log({
   recoveredArkBytes: recoveredArk.length,
 });
 
-const wrongAad = encoder.encode(
-  'pm:v1:ark:different-context:key-version:1',
-);
+const wrongAad = encoder.encode('pm:v1:ark:different-context:key-version:1');
 
 let rejectedWrongContext = false;
 
@@ -78,24 +70,17 @@ if (!rejectedWrongContext) {
 
 console.log('AAD tampering rejected correctly');
 
+const cryptoProfileId = '0199c531-a830-7000-8000-000000000001';
 
-const cryptoProfileId =
-  '0199c531-a830-7000-8000-000000000001';
+const vaultId = '0199c531-a830-7000-8000-000000000002';
 
-const vaultId =
-  '0199c531-a830-7000-8000-000000000002';
-
-const rootAad = encoder.encode(
-  `pm:v1:ark:crypto-profile:${cryptoProfileId}:key-version:1`,
-);
+const rootAad = encoder.encode(`pm:v1:ark:crypto-profile:${cryptoProfileId}:key-version:1`);
 
 const recoveryAad = encoder.encode(
   `pm:v1:recovery-ark:crypto-profile:${cryptoProfileId}:key-version:1`,
 );
 
-const vaultAad = encoder.encode(
-  `pm:v1:pvk:vault:${vaultId}:key-version:1`,
-);
+const vaultAad = encoder.encode(`pm:v1:pvk:vault:${vaultId}:key-version:1`);
 
 const bootstrap = create_account_bootstrap(
   'correct horse battery staple',
@@ -104,23 +89,17 @@ const bootstrap = create_account_bootstrap(
   vaultAad,
 );
 
-const bootstrapAccountSecret =
-  bootstrap.account_secret();
+const bootstrapAccountSecret = bootstrap.account_secret();
 
-const bootstrapRecoveryKey =
-  bootstrap.recovery_key();
+const bootstrapRecoveryKey = bootstrap.recovery_key();
 
-const bootstrapSalt =
-  bootstrap.kdf_salt();
+const bootstrapSalt = bootstrap.kdf_salt();
 
-const rootEnvelope =
-  bootstrap.root_key_envelope();
+const rootEnvelope = bootstrap.root_key_envelope();
 
-const recoveryEnvelope =
-  bootstrap.recovery_root_key_envelope();
+const recoveryEnvelope = bootstrap.recovery_root_key_envelope();
 
-const vaultEnvelope =
-  bootstrap.vault_key_envelope();
+const vaultEnvelope = bootstrap.vault_key_envelope();
 
 console.log('Account bootstrap WASM test passed');
 
@@ -137,21 +116,18 @@ console.log({
   vaultEnvelopeBytes: vaultEnvelope.length,
 });
 
-const unlockedVault =
-  unlock_personal_vault(
-    'correct horse battery staple',
-    bootstrapAccountSecret,
-    bootstrapSalt,
-    rootEnvelope,
-    rootAad,
-    vaultEnvelope,
-    vaultAad,
-  );
+const unlockedVault = unlock_personal_vault(
+  'correct horse battery staple',
+  bootstrapAccountSecret,
+  bootstrapSalt,
+  rootEnvelope,
+  rootAad,
+  vaultEnvelope,
+  vaultAad,
+);
 
 if (unlockedVault.is_cleared) {
-  throw new Error(
-    'Vault unexpectedly started cleared',
-  );
+  throw new Error('Vault unexpectedly started cleared');
 }
 
 console.log('WASM vault unlock test passed');
@@ -164,72 +140,50 @@ const itemPayloadAad = encoder.encode(
   'pm:v1:item-payload:vault:test-vault:item:test-item:revision:1:item-key-version:1',
 );
 
-const encryptedItem =
-  encrypt_login_item(
-    unlockedVault,
-    {
-      name: 'GitHub',
-      username:
-        'daniel@example.com',
-      password:
-        'super-secret-password',
-      urls: [
-        'https://github.com',
-      ],
-      notes:
-        'Personal account',
-    },
-    itemKeyAad,
-    itemPayloadAad,
-  );
-
-const encryptedItemKey =
-  encryptedItem
-    .item_key_envelope();
-
-const itemCiphertext =
-  encryptedItem.ciphertext();
-
-const decryptedItem =
-  decrypt_login_item(
-    unlockedVault,
-    encryptedItemKey,
-    itemKeyAad,
-    itemCiphertext,
-    itemPayloadAad,
-  );
-
-if (
-  decryptedItem.itemType !==
-    'LOGIN' ||
-  decryptedItem.name !==
-    'GitHub' ||
-  decryptedItem.username !==
-    'daniel@example.com' ||
-  decryptedItem.password !==
-    'super-secret-password'
-) {
-  throw new Error(
-    'Decrypted LOGIN item does not match original item',
-  );
-}
-
-console.log(
-  'WASM LOGIN item roundtrip passed',
+const encryptedItem = encrypt_login_item(
+  unlockedVault,
+  {
+    name: 'GitHub',
+    username: 'daniel@example.com',
+    password: 'super-secret-password',
+    urls: ['https://github.com'],
+    notes: 'Personal account',
+  },
+  itemKeyAad,
+  itemPayloadAad,
 );
 
+const encryptedItemKey = encryptedItem.item_key_envelope();
+
+const itemCiphertext = encryptedItem.ciphertext();
+
+const decryptedItem = decrypt_login_item(
+  unlockedVault,
+  encryptedItemKey,
+  itemKeyAad,
+  itemCiphertext,
+  itemPayloadAad,
+);
+
+if (
+  decryptedItem.itemType !== 'LOGIN' ||
+  decryptedItem.name !== 'GitHub' ||
+  decryptedItem.username !== 'daniel@example.com' ||
+  decryptedItem.password !== 'super-secret-password'
+) {
+  throw new Error('Decrypted LOGIN item does not match original item');
+}
+
+console.log('WASM LOGIN item roundtrip passed');
+
 console.log({
-  itemKeyEnvelopeBytes:
-    encryptedItemKey.length,
+  itemKeyEnvelopeBytes: encryptedItemKey.length,
 
-  itemCiphertextBytes:
-    itemCiphertext.length,
+  itemCiphertextBytes: itemCiphertext.length,
 
-  payloadVersion:
-    encryptedItem.payload_version,
+  payloadVersion: encryptedItem.payload_version,
 
-  ciphertextVersion:
-    encryptedItem.ciphertext_version,
+  ciphertextVersion: encryptedItem.ciphertext_version,
 });
 
 encryptedItemKey.fill(0);
@@ -241,30 +195,25 @@ encryptedItem.free();
 unlockedVault.clear();
 
 if (!unlockedVault.is_cleared) {
-  throw new Error(
-    'Unlocked vault did not clear',
-  );
+  throw new Error('Unlocked vault did not clear');
 }
 
-console.log(
-  'WASM unlocked vault cleanup passed',
-);
+console.log('WASM unlocked vault cleanup passed');
 
 unlockedVault.free();
 
 let wrongPasswordRejected = false;
 
 try {
-  const shouldFail =
-    unlock_personal_vault(
-      'definitely wrong password',
-      bootstrapAccountSecret,
-      bootstrapSalt,
-      rootEnvelope,
-      rootAad,
-      vaultEnvelope,
-      vaultAad,
-    );
+  const shouldFail = unlock_personal_vault(
+    'definitely wrong password',
+    bootstrapAccountSecret,
+    bootstrapSalt,
+    rootEnvelope,
+    rootAad,
+    vaultEnvelope,
+    vaultAad,
+  );
 
   shouldFail.clear();
   shouldFail.free();
@@ -273,14 +222,10 @@ try {
 }
 
 if (!wrongPasswordRejected) {
-  throw new Error(
-    'Wrong Master Password unexpectedly unlocked vault',
-  );
+  throw new Error('Wrong Master Password unexpectedly unlocked vault');
 }
 
-console.log(
-  'Wrong Master Password rejected correctly',
-);
+console.log('Wrong Master Password rejected correctly');
 
 bootstrapAccountSecret.fill(0);
 bootstrapRecoveryKey.fill(0);

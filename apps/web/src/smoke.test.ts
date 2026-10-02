@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from 'vitest';
 
-describe("web bootstrap", () => {
-  it("runs tests", () => {
+describe('web bootstrap', () => {
+  it('runs tests', () => {
     expect(true).toBe(true);
   });
 });

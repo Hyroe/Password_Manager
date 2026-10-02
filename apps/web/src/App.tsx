@@ -16,6 +16,9 @@ import { createVaultSearchEntry, type VaultSearchEntry } from './lib/vaultSearch
 
 import { createVaultListView } from './lib/vaultList';
 
+import { AppShell } from './components/layout/AppShell';
+import { AuthShell } from './components/layout/AuthShell';
+
 import {
   browserSupportsWebAuthn,
   startRegistration,
@@ -2905,281 +2908,371 @@ export default function App() {
     }
   }
 
+  const authenticated =
+    (runtimeState === 'AUTHENTICATED_LOCKED' || runtimeState === 'UNLOCKED') &&
+    authenticatedUser !== null;
+
+  const vaultNavigationActive = isVaultRoute || isVaultItemRoute;
+
   return (
-    <main>
-      <h1>Password Manager</h1>
+    <main className={`app-root ${authenticated ? 'app-root--workspace' : ''}`}>
+      {!authenticated && (
+        <AuthShell>
+          {runtimeState === 'CHECKING_SESSION' && (
+            <section>
+              <h2>Checking session</h2>
 
-      {runtimeState === 'CHECKING_SESSION' && (
-        <section>
-          <h2>Checking session</h2>
-
-          <p>Restoring your authenticated session…</p>
-        </section>
-      )}
-
-      {runtimeState === 'SESSION_UNAVAILABLE' && (
-        <section>
-          <h2>Session unavailable</h2>
-
-          <p>The application could not verify your session.</p>
-
-          <button type="button" disabled={loading} onClick={retrySessionRestore}>
-            Retry
-          </button>
-        </section>
-      )}
-
-      {runtimeState === 'AUTHENTICATED_LOCKED' && authenticatedUser && (
-        <section>
-          <h2>Vault locked</h2>
-
-          <p>
-            Signed in as <strong>{authenticatedUser.email}</strong>
-          </p>
-
-          <p>Your identity is authenticated, but your vault keys are not loaded.</p>
-
-          {isVaultRoute && (
-            <>
-              <label>
-                Recovery Kit
-                <input
-                  ref={recoveryKitFileRef}
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={(event) => {
-                    void handleRecoveryKitFile(event.target.files?.[0]);
-                  }}
-                />
-              </label>
-
-              {recoveryKitLoaded && (
-                <>
-                  <input
-                    ref={unlockMasterPasswordRef}
-                    type="password"
-                    placeholder="Master Password"
-                    autoComplete="current-password"
-                  />
-
-                  <button type="button" disabled={loading} onClick={handleUnlockVault}>
-                    Unlock vault
-                  </button>
-                </>
-              )}
-
-              <hr />
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.security);
-                }}
-              >
-                Security settings
-              </button>
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.recovery);
-                }}
-              >
-                Recover Master Password
-              </button>
-            </>
+              <p>Restoring your authenticated session…</p>
+            </section>
           )}
 
-          {isSecurityRoute && (
+          {runtimeState === 'SESSION_UNAVAILABLE' && (
+            <section>
+              <h2>Session unavailable</h2>
+
+              <p>The application could not verify your session.</p>
+
+              <button type="button" disabled={loading} onClick={retrySessionRestore}>
+                Retry
+              </button>
+            </section>
+          )}
+
+          {runtimeState === 'SIGNED_OUT' && (
             <>
-              <hr />
+              {isLoginRoute && (
+                <section>
+                  <h2>Sign in</h2>
 
-              <h3>Security settings</h3>
+                  <p>Authenticate with your passkey.</p>
 
-              <p>
-                <strong>Vault status:</strong> Locked
-              </p>
+                  <button
+                    type="button"
+                    disabled={loading || !webAuthnSupported}
+                    onClick={handlePasskeyLogin}
+                  >
+                    Sign in with passkey
+                  </button>
 
-              <p>
-                Your account is authenticated, but vault keys are not loaded in this browser
-                session.
-              </p>
+                  <hr />
 
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.vault);
-                }}
-              >
-                Back to vault
-              </button>
+                  <p>Need an account?</p>
 
-              <hr />
-
-              <h4>Sessions</h4>
-
-              <p>Review and revoke authenticated sessions for your account.</p>
-
-              <button
-                type="button"
-                disabled={loading || securitySessionsLoading}
-                onClick={handleLoadSessions}
-              >
-                {securitySessionsLoading ? 'Loading sessions…' : 'Refresh sessions'}
-              </button>
-
-              {managedSessions.length > 1 && (
-                <button
-                  type="button"
-                  disabled={loading || securitySessionsLoading}
-                  onClick={handleRevokeOtherSessions}
-                >
-                  Sign out other sessions
-                </button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      navigate(routes.register);
+                    }}
+                  >
+                    Create account
+                  </button>
+                </section>
               )}
 
-              {managedSessions.length > 0 && (
-                <ul>
-                  {managedSessions.map((session) => (
-                    <li key={session.id}>
-                      <strong>{session.deviceLabel}</strong>
-                      {session.current && ' — Current session'}
-                      <br />
-                      Last active: {new Date(session.lastSeenAt).toLocaleString()}
-                      <br />
-                      Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
-                      <br />
+              {isRegisterRoute && (
+                <>
+                  {!registrationId && !completedAccount && (
+                    <section>
+                      <h2>Create account</h2>
+
+                      <input
+                        type="email"
+                        value={email}
+                        placeholder="you@example.com"
+                        autoComplete="email"
+                        onChange={(event) => setEmail(event.target.value)}
+                      />
+
                       <button
                         type="button"
-                        disabled={loading || securitySessionsLoading}
+                        disabled={loading || !email}
+                        onClick={startAccountRegistration}
+                      >
+                        Start registration
+                      </button>
+
+                      <hr />
+
+                      <button
+                        type="button"
+                        disabled={loading}
                         onClick={() => {
-                          void handleRevokeManagedSession(session.id, session.current);
+                          navigate(routes.login);
                         }}
                       >
-                        {session.current ? 'Sign out this session' : 'Sign out'}
+                        Sign in instead
                       </button>
-                    </li>
-                  ))}
-                </ul>
+                    </section>
+                  )}
+
+                  {registrationId && !registrationToken && !bootstrapToken && !completedAccount && (
+                    <section>
+                      <h2>Verify email</h2>
+
+                      <p>Copy the local verification token from the API terminal.</p>
+
+                      <input
+                        type="text"
+                        value={verificationToken}
+                        placeholder="Verification token"
+                        onChange={(event) => setVerificationToken(event.target.value)}
+                      />
+
+                      <button
+                        type="button"
+                        disabled={loading || !verificationToken}
+                        onClick={verifyEmail}
+                      >
+                        Verify email
+                      </button>
+                    </section>
+                  )}
+
+                  {registrationToken && !bootstrapToken && !completedAccount && (
+                    <section>
+                      <h2>Create passkey</h2>
+
+                      <button
+                        type="button"
+                        disabled={loading || !webAuthnSupported}
+                        onClick={registerPasskey}
+                      >
+                        Create passkey
+                      </button>
+                    </section>
+                  )}
+
+                  {bootstrapToken && !bootstrapOptions && !completedAccount && (
+                    <section>
+                      <h2>Protect your vault</h2>
+
+                      <p>Your Master Password never leaves this browser.</p>
+
+                      <input
+                        ref={masterPasswordRef}
+                        type="password"
+                        placeholder="Master Password"
+                        autoComplete="new-password"
+                      />
+
+                      <input
+                        ref={confirmMasterPasswordRef}
+                        type="password"
+                        placeholder="Confirm Master Password"
+                        autoComplete="new-password"
+                      />
+
+                      <button type="button" disabled={loading} onClick={prepareCryptoBootstrap}>
+                        Create vault keys
+                      </button>
+                    </section>
+                  )}
+
+                  {bootstrapOptions && !recoveryKitDownloaded && !completedAccount && (
+                    <section>
+                      <h2>Save Recovery Kit</h2>
+
+                      <p>Store it securely and separately from your Master Password.</p>
+
+                      <button type="button" disabled={loading} onClick={saveRecoveryKit}>
+                        Download Recovery Kit
+                      </button>
+                    </section>
+                  )}
+
+                  {bootstrapOptions && recoveryKitDownloaded && !completedAccount && (
+                    <section>
+                      <h2>Activate account</h2>
+
+                      <button type="button" disabled={loading} onClick={activateAccount}>
+                        Activate account
+                      </button>
+                    </section>
+                  )}
+
+                  {completedAccount && (
+                    <section>
+                      <h2>Account ready</h2>
+
+                      <p>Your encrypted personal vault has been created.</p>
+
+                      <button type="button" onClick={finishOnboarding}>
+                        Continue to sign in
+                      </button>
+                    </section>
+                  )}
+                </>
               )}
+            </>
+          )}
+        </AuthShell>
+      )}
 
-              <hr />
-
-              <h4>Master Password</h4>
+      {authenticated && authenticatedUser && (
+        <AppShell
+          email={authenticatedUser.email}
+          vaultStatus={runtimeState === 'UNLOCKED' ? 'unlocked' : 'locked'}
+          vaultActive={vaultNavigationActive}
+          securityActive={isSecurityRoute}
+          onNavigateVault={() => {
+            navigate(routes.vault);
+          }}
+          onNavigateSecurity={() => {
+            navigate(routes.security);
+          }}
+          onLockVault={runtimeState === 'UNLOCKED' ? handleLockVault : undefined}
+          onSignOut={() => {
+            void handleLogout();
+          }}
+        >
+          {runtimeState === 'AUTHENTICATED_LOCKED' && authenticatedUser && (
+            <section>
+              <h2>Vault locked</h2>
 
               <p>
-                Changing your Master Password re-wraps the account root key. Existing vault items
-                are not re-encrypted.
+                Signed in as <strong>{authenticatedUser.email}</strong>
               </p>
 
-              <p>Load your Recovery Kit locally to continue.</p>
+              <p>Your identity is authenticated, but your vault keys are not loaded.</p>
 
-              <label>
-                Recovery Kit
-                <input
-                  ref={recoveryKitFileRef}
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={(event) => {
-                    void handleRecoveryKitFile(event.target.files?.[0]);
-                  }}
-                />
-              </label>
-
-              {recoveryKitLoaded && (
+              {isVaultRoute && (
                 <>
-                  <div>
+                  <label>
+                    Recovery Kit
                     <input
-                      ref={changeCurrentMasterPasswordRef}
-                      type="password"
-                      placeholder="Current Master Password"
-                      autoComplete="current-password"
+                      ref={recoveryKitFileRef}
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={(event) => {
+                        void handleRecoveryKitFile(event.target.files?.[0]);
+                      }}
                     />
-                  </div>
+                  </label>
 
-                  <div>
-                    <input
-                      ref={changeNewMasterPasswordRef}
-                      type="password"
-                      placeholder="New Master Password"
-                      autoComplete="new-password"
-                    />
-                  </div>
+                  {recoveryKitLoaded && (
+                    <>
+                      <input
+                        ref={unlockMasterPasswordRef}
+                        type="password"
+                        placeholder="Master Password"
+                        autoComplete="current-password"
+                      />
 
-                  <div>
-                    <input
-                      ref={changeConfirmMasterPasswordRef}
-                      type="password"
-                      placeholder="Confirm new Master Password"
-                      autoComplete="new-password"
-                    />
-                  </div>
+                      <button type="button" disabled={loading} onClick={handleUnlockVault}>
+                        Unlock vault
+                      </button>
+                    </>
+                  )}
 
-                  <button type="button" disabled={loading} onClick={handleChangeMasterPassword}>
-                    Change Master Password
+                  <hr />
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      navigate(routes.security);
+                    }}
+                  >
+                    Security settings
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      navigate(routes.recovery);
+                    }}
+                  >
+                    Recover Master Password
                   </button>
                 </>
               )}
 
-              <hr />
-
-              <h4>Account recovery</h4>
-
-              <p>
-                If you no longer know your current Master Password, use the recovery flow instead.
-              </p>
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.recovery);
-                }}
-              >
-                Recover Master Password
-              </button>
-
-              <hr />
-
-              <button type="button" disabled={loading} onClick={handleLogout}>
-                Sign out
-              </button>
-            </>
-          )}
-
-          {isRecoveryRoute && (
-            <>
-              <hr />
-
-              <h3>Recover Master Password</h3>
-
-              <p>
-                <strong>Vault status:</strong> Locked
-              </p>
-
-              <p>
-                Recovery lets you replace a forgotten Master Password while keeping the existing
-                account and vault encryption keys.
-              </p>
-
-              <p>
-                Completing recovery will revoke every authenticated session, including this one. You
-                will need to sign in again with your passkey.
-              </p>
-
-              <hr />
-
-              <h4>Recovery Kit</h4>
-
-              {!recoveryKitLoaded ? (
+              {isSecurityRoute && (
                 <>
+                  <hr />
+
+                  <h3>Security settings</h3>
+
                   <p>
-                    Load your Recovery Kit locally. The file is processed only inside this browser
-                    and is not uploaded to the server.
+                    <strong>Vault status:</strong> Locked
                   </p>
+
+                  <p>
+                    Your account is authenticated, but vault keys are not loaded in this browser
+                    session.
+                  </p>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      navigate(routes.vault);
+                    }}
+                  >
+                    Back to vault
+                  </button>
+
+                  <hr />
+
+                  <h4>Sessions</h4>
+
+                  <p>Review and revoke authenticated sessions for your account.</p>
+
+                  <button
+                    type="button"
+                    disabled={loading || securitySessionsLoading}
+                    onClick={handleLoadSessions}
+                  >
+                    {securitySessionsLoading ? 'Loading sessions…' : 'Refresh sessions'}
+                  </button>
+
+                  {managedSessions.length > 1 && (
+                    <button
+                      type="button"
+                      disabled={loading || securitySessionsLoading}
+                      onClick={handleRevokeOtherSessions}
+                    >
+                      Sign out other sessions
+                    </button>
+                  )}
+
+                  {managedSessions.length > 0 && (
+                    <ul>
+                      {managedSessions.map((session) => (
+                        <li key={session.id}>
+                          <strong>{session.deviceLabel}</strong>
+                          {session.current && ' — Current session'}
+                          <br />
+                          Last active: {new Date(session.lastSeenAt).toLocaleString()}
+                          <br />
+                          Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
+                          <br />
+                          <button
+                            type="button"
+                            disabled={loading || securitySessionsLoading}
+                            onClick={() => {
+                              void handleRevokeManagedSession(session.id, session.current);
+                            }}
+                          >
+                            {session.current ? 'Sign out this session' : 'Sign out'}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <hr />
+
+                  <h4>Master Password</h4>
+
+                  <p>
+                    Changing your Master Password re-wraps the account root key. Existing vault
+                    items are not re-encrypted.
+                  </p>
+
+                  <p>Load your Recovery Kit locally to continue.</p>
 
                   <label>
                     Recovery Kit
@@ -3192,265 +3285,421 @@ export default function App() {
                       }}
                     />
                   </label>
-                </>
-              ) : (
-                <>
-                  <p>Recovery Kit loaded for this recovery session.</p>
 
-                  <button type="button" disabled={loading} onClick={discardRecoveryFlowState}>
-                    Discard Recovery Kit
-                  </button>
+                  {recoveryKitLoaded && (
+                    <>
+                      <div>
+                        <input
+                          ref={changeCurrentMasterPasswordRef}
+                          type="password"
+                          placeholder="Current Master Password"
+                          autoComplete="current-password"
+                        />
+                      </div>
+
+                      <div>
+                        <input
+                          ref={changeNewMasterPasswordRef}
+                          type="password"
+                          placeholder="New Master Password"
+                          autoComplete="new-password"
+                        />
+                      </div>
+
+                      <div>
+                        <input
+                          ref={changeConfirmMasterPasswordRef}
+                          type="password"
+                          placeholder="Confirm new Master Password"
+                          autoComplete="new-password"
+                        />
+                      </div>
+
+                      <button type="button" disabled={loading} onClick={handleChangeMasterPassword}>
+                        Change Master Password
+                      </button>
+                    </>
+                  )}
 
                   <hr />
 
-                  <h4>New Master Password</h4>
+                  <h4>Account recovery</h4>
 
-                  <div>
-                    <input
-                      ref={recoveryNewMasterPasswordRef}
-                      type="password"
-                      placeholder="New Master Password"
-                      autoComplete="new-password"
-                    />
-                  </div>
+                  <p>
+                    If you no longer know your current Master Password, use the recovery flow
+                    instead.
+                  </p>
 
-                  <div>
-                    <input
-                      ref={recoveryConfirmMasterPasswordRef}
-                      type="password"
-                      placeholder="Confirm new Master Password"
-                      autoComplete="new-password"
-                    />
-                  </div>
-
-                  <button type="button" disabled={loading} onClick={handleRecoverMasterPassword}>
-                    {loading ? 'Recovering…' : 'Recover Master Password'}
-                  </button>
-                </>
-              )}
-
-              <hr />
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.vault);
-                }}
-              >
-                Cancel recovery
-              </button>
-            </>
-          )}
-        </section>
-      )}
-
-      {runtimeState === 'UNLOCKED' && authenticatedUser && (
-        <section>
-          <h2>Vault unlocked</h2>
-
-          <p>
-            Signed in as <strong>{authenticatedUser.email}</strong>
-          </p>
-
-          <p>Vault keys are available only inside the local WASM runtime.</p>
-
-          {isVaultRoute && (
-            <>
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.security);
-                }}
-              >
-                Security settings
-              </button>
-
-              <hr />
-
-              <h3>New login</h3>
-
-              <div>
-                <label>
-                  Name
-                  <input
-                    ref={loginNameRef}
-                    type="text"
-                    autoComplete="off"
-                    placeholder="GitHub"
-                    onChange={scheduleNewLoginPasswordStrength}
-                  />
-                </label>
-              </div>
-
-              <div>
-                <label>
-                  Username
-                  <input
-                    ref={loginUsernameRef}
-                    type="text"
-                    autoComplete="off"
-                    placeholder="you@example.com"
-                    onChange={scheduleNewLoginPasswordStrength}
-                  />
-                </label>
-              </div>
-
-              <div>
-                <label>
-                  Password
-                  <input
-                    ref={loginPasswordRef}
-                    type={newLoginPasswordVisible ? 'text' : 'password'}
-                    autoComplete="off"
-                    placeholder="Password"
-                    onChange={scheduleNewLoginPasswordStrength}
-                  />
-                </label>
-
-                <button type="button" disabled={loading} onClick={handleGenerateNewLoginPassword}>
-                  Generate password
-                </button>
-
-                <button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => {
-                    setNewLoginPasswordVisible((visible) => !visible);
-                  }}
-                >
-                  {newLoginPasswordVisible ? 'Hide password' : 'Show password'}
-                </button>
-              </div>
-
-              <PasswordStrengthFeedback
-                assessment={newLoginPasswordStrength}
-                loading={newLoginPasswordStrengthLoading}
-              />
-
-              <div>
-                <label>
-                  URL
-                  <input
-                    ref={loginUrlRef}
-                    type="url"
-                    autoComplete="off"
-                    placeholder="https://example.com"
-                    onChange={scheduleNewLoginPasswordStrength}
-                  />
-                </label>
-              </div>
-
-              <div>
-                <label>
-                  Notes
-                  <textarea ref={loginNotesRef} placeholder="Optional notes" />
-                </label>
-              </div>
-
-              <button type="button" disabled={loading} onClick={handleCreateLoginItem}>
-                Save login
-              </button>
-
-              <hr />
-
-              <h3>Vault items ({vaultListView.totalCount})</h3>
-
-              <div>
-                <label>
-                  Search
-                  <input
-                    type="search"
-                    value={vaultSearchQuery}
-                    placeholder="Search name, username, or URL"
-                    autoComplete="off"
-                    onChange={(event) => {
-                      setVaultSearchQuery(event.target.value);
-                    }}
-                  />
-                </label>
-
-                {vaultListView.hasQuery && (
                   <button
                     type="button"
                     disabled={loading}
                     onClick={() => {
-                      setVaultSearchQuery('');
+                      navigate(routes.recovery);
                     }}
                   >
-                    Clear search
+                    Recover Master Password
                   </button>
-                )}
-              </div>
 
-              <button
-                type="button"
-                disabled={loading || vaultSearchIndexing}
-                onClick={() => {
-                  void refreshVaultItems();
-                }}
-              >
-                Refresh
-              </button>
+                  <hr />
 
-              {vaultSearchIndexing && <p>Building local search index…</p>}
+                  <button type="button" disabled={loading} onClick={handleLogout}>
+                    Sign out
+                  </button>
+                </>
+              )}
 
-              {vaultSearchIndexError && <p role="alert">{vaultSearchIndexError}</p>}
-
-              {vaultItems.length === 0 ? (
-                <p>No saved logins yet.</p>
-              ) : vaultSearchIndexing &&
-                vaultSearchEntries.length === 0 ? null : vaultSearchEntries.length === 0 ? (
-                <p>No vault items could be indexed locally.</p>
-              ) : (
+              {isRecoveryRoute && (
                 <>
-                  {vaultListView.hasQuery ? (
-                    <p>
-                      Showing {vaultListView.visibleCount} of {vaultListView.totalCount}{' '}
-                      {vaultListView.totalCount === 1 ? 'login' : 'logins'}.
-                    </p>
+                  <hr />
+
+                  <h3>Recover Master Password</h3>
+
+                  <p>
+                    <strong>Vault status:</strong> Locked
+                  </p>
+
+                  <p>
+                    Recovery lets you replace a forgotten Master Password while keeping the existing
+                    account and vault encryption keys.
+                  </p>
+
+                  <p>
+                    Completing recovery will revoke every authenticated session, including this one.
+                    You will need to sign in again with your passkey.
+                  </p>
+
+                  <hr />
+
+                  <h4>Recovery Kit</h4>
+
+                  {!recoveryKitLoaded ? (
+                    <>
+                      <p>
+                        Load your Recovery Kit locally. The file is processed only inside this
+                        browser and is not uploaded to the server.
+                      </p>
+
+                      <label>
+                        Recovery Kit
+                        <input
+                          ref={recoveryKitFileRef}
+                          type="file"
+                          accept=".json,application/json"
+                          onChange={(event) => {
+                            void handleRecoveryKitFile(event.target.files?.[0]);
+                          }}
+                        />
+                      </label>
+                    </>
                   ) : (
-                    <p>
-                      {vaultListView.totalCount}{' '}
-                      {vaultListView.totalCount === 1 ? 'login' : 'logins'}.
-                    </p>
+                    <>
+                      <p>Recovery Kit loaded for this recovery session.</p>
+
+                      <button type="button" disabled={loading} onClick={discardRecoveryFlowState}>
+                        Discard Recovery Kit
+                      </button>
+
+                      <hr />
+
+                      <h4>New Master Password</h4>
+
+                      <div>
+                        <input
+                          ref={recoveryNewMasterPasswordRef}
+                          type="password"
+                          placeholder="New Master Password"
+                          autoComplete="new-password"
+                        />
+                      </div>
+
+                      <div>
+                        <input
+                          ref={recoveryConfirmMasterPasswordRef}
+                          type="password"
+                          placeholder="Confirm new Master Password"
+                          autoComplete="new-password"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={handleRecoverMasterPassword}
+                      >
+                        {loading ? 'Recovering…' : 'Recover Master Password'}
+                      </button>
+                    </>
                   )}
 
-                  {vaultListView.emptyState === 'NO_SEARCH_RESULTS' ? (
-                    <p>No logins match your search.</p>
+                  <hr />
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      navigate(routes.vault);
+                    }}
+                  >
+                    Cancel recovery
+                  </button>
+                </>
+              )}
+            </section>
+          )}
+
+          {runtimeState === 'UNLOCKED' && authenticatedUser && (
+            <section>
+              <h2>Vault unlocked</h2>
+
+              <p>
+                Signed in as <strong>{authenticatedUser.email}</strong>
+              </p>
+
+              <p>Vault keys are available only inside the local WASM runtime.</p>
+
+              {isVaultRoute && (
+                <>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      navigate(routes.security);
+                    }}
+                  >
+                    Security settings
+                  </button>
+
+                  <hr />
+
+                  <h3>New login</h3>
+
+                  <div>
+                    <label>
+                      Name
+                      <input
+                        ref={loginNameRef}
+                        type="text"
+                        autoComplete="off"
+                        placeholder="GitHub"
+                        onChange={scheduleNewLoginPasswordStrength}
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label>
+                      Username
+                      <input
+                        ref={loginUsernameRef}
+                        type="text"
+                        autoComplete="off"
+                        placeholder="you@example.com"
+                        onChange={scheduleNewLoginPasswordStrength}
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label>
+                      Password
+                      <input
+                        ref={loginPasswordRef}
+                        type={newLoginPasswordVisible ? 'text' : 'password'}
+                        autoComplete="off"
+                        placeholder="Password"
+                        onChange={scheduleNewLoginPasswordStrength}
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={handleGenerateNewLoginPassword}
+                    >
+                      Generate password
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => {
+                        setNewLoginPasswordVisible((visible) => !visible);
+                      }}
+                    >
+                      {newLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                    </button>
+                  </div>
+
+                  <PasswordStrengthFeedback
+                    assessment={newLoginPasswordStrength}
+                    loading={newLoginPasswordStrengthLoading}
+                  />
+
+                  <div>
+                    <label>
+                      URL
+                      <input
+                        ref={loginUrlRef}
+                        type="url"
+                        autoComplete="off"
+                        placeholder="https://example.com"
+                        onChange={scheduleNewLoginPasswordStrength}
+                      />
+                    </label>
+                  </div>
+
+                  <div>
+                    <label>
+                      Notes
+                      <textarea ref={loginNotesRef} placeholder="Optional notes" />
+                    </label>
+                  </div>
+
+                  <button type="button" disabled={loading} onClick={handleCreateLoginItem}>
+                    Save login
+                  </button>
+
+                  <hr />
+
+                  <h3>Vault items ({vaultListView.totalCount})</h3>
+
+                  <div>
+                    <label>
+                      Search
+                      <input
+                        type="search"
+                        value={vaultSearchQuery}
+                        placeholder="Search name, username, or URL"
+                        autoComplete="off"
+                        onChange={(event) => {
+                          setVaultSearchQuery(event.target.value);
+                        }}
+                      />
+                    </label>
+
+                    {vaultListView.hasQuery && (
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          setVaultSearchQuery('');
+                        }}
+                      >
+                        Clear search
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={loading || vaultSearchIndexing}
+                    onClick={() => {
+                      void refreshVaultItems();
+                    }}
+                  >
+                    Refresh
+                  </button>
+
+                  {vaultSearchIndexing && <p>Building local search index…</p>}
+
+                  {vaultSearchIndexError && <p role="alert">{vaultSearchIndexError}</p>}
+
+                  {vaultItems.length === 0 ? (
+                    <p>No saved logins yet.</p>
+                  ) : vaultSearchIndexing &&
+                    vaultSearchEntries.length === 0 ? null : vaultSearchEntries.length === 0 ? (
+                    <p>No vault items could be indexed locally.</p>
+                  ) : (
+                    <>
+                      {vaultListView.hasQuery ? (
+                        <p>
+                          Showing {vaultListView.visibleCount} of {vaultListView.totalCount}{' '}
+                          {vaultListView.totalCount === 1 ? 'login' : 'logins'}.
+                        </p>
+                      ) : (
+                        <p>
+                          {vaultListView.totalCount}{' '}
+                          {vaultListView.totalCount === 1 ? 'login' : 'logins'}.
+                        </p>
+                      )}
+
+                      {vaultListView.emptyState === 'NO_SEARCH_RESULTS' ? (
+                        <p>No logins match your search.</p>
+                      ) : (
+                        <ul>
+                          {vaultListView.entries.map((entry) => (
+                            <li key={entry.itemId}>
+                              <div>
+                                <strong>{entry.name}</strong>
+                              </div>
+
+                              {entry.username && <div>{entry.username}</div>}
+
+                              {entry.urls[0] && <div>{entry.urls[0]}</div>}
+
+                              <div>
+                                <button
+                                  type="button"
+                                  disabled={loading || vaultSearchIndexing}
+                                  onClick={() => {
+                                    handleViewLoginItem(entry.itemId);
+                                  }}
+                                >
+                                  View
+                                </button>{' '}
+                                <button
+                                  type="button"
+                                  disabled={loading || vaultSearchIndexing}
+                                  onClick={() => {
+                                    void handleDeleteLoginItem(entry.itemId);
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
+
+                  <h3>Deleted items ({deletedVaultItems.length})</h3>
+
+                  <p>
+                    Deleted items are retained temporarily so their deletion state can synchronize
+                    across clients.
+                  </p>
+
+                  {deletedVaultItems.length === 0 ? (
+                    <p>No deleted items.</p>
                   ) : (
                     <ul>
-                      {vaultListView.entries.map((entry) => (
-                        <li key={entry.itemId}>
+                      {deletedVaultItems.map((item) => (
+                        <li key={item.id}>
                           <div>
-                            <strong>{entry.name}</strong>
+                            <strong>Deleted login</strong>
                           </div>
 
-                          {entry.username && <div>{entry.username}</div>}
-
-                          {entry.urls[0] && <div>{entry.urls[0]}</div>}
-
                           <div>
-                            <button
-                              type="button"
-                              disabled={loading || vaultSearchIndexing}
-                              onClick={() => {
-                                handleViewLoginItem(entry.itemId);
-                              }}
-                            >
-                              View
-                            </button>{' '}
-                            <button
-                              type="button"
-                              disabled={loading || vaultSearchIndexing}
-                              onClick={() => {
-                                void handleDeleteLoginItem(entry.itemId);
-                              }}
-                            >
-                              Delete
-                            </button>
+                            Item ID: <code>{item.id}</code>
                           </div>
+
+                          <div>Revision: {item.revisionNumber}</div>
+
+                          {item.deletedAt && (
+                            <div>Deleted: {new Date(item.deletedAt).toLocaleString()}</div>
+                          )}
+
+                          <button
+                            type="button"
+                            disabled={loading}
+                            onClick={() => {
+                              void handleRestoreLoginItem(item.id);
+                            }}
+                          >
+                            Restore
+                          </button>
                         </li>
                       ))}
                     </ul>
@@ -3458,540 +3707,346 @@ export default function App() {
                 </>
               )}
 
-              <h3>Deleted items ({deletedVaultItems.length})</h3>
-
-              <p>
-                Deleted items are retained temporarily so their deletion state can synchronize
-                across clients.
-              </p>
-
-              {deletedVaultItems.length === 0 ? (
-                <p>No deleted items.</p>
-              ) : (
-                <ul>
-                  {deletedVaultItems.map((item) => (
-                    <li key={item.id}>
-                      <div>
-                        <strong>Deleted login</strong>
-                      </div>
-
-                      <div>
-                        Item ID: <code>{item.id}</code>
-                      </div>
-
-                      <div>Revision: {item.revisionNumber}</div>
-
-                      {item.deletedAt && (
-                        <div>Deleted: {new Date(item.deletedAt).toLocaleString()}</div>
-                      )}
-
-                      <button
-                        type="button"
-                        disabled={loading}
-                        onClick={() => {
-                          void handleRestoreLoginItem(item.id);
-                        }}
-                      >
-                        Restore
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
-
-          {isVaultItemRoute && (
-            <>
-              <hr />
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.vault);
-                }}
-              >
-                Back to vault
-              </button>
-
-              {loading && !selectedLogin && <p>Loading login…</p>}
-
-              {!loading && !selectedLogin && <p>Vault item could not be loaded.</p>}
-
-              {selectedLogin && selectedItemId && (
+              {isVaultItemRoute && (
                 <>
-                  <h3>Decrypted login</h3>
-
-                  <p>
-                    <strong>Item ID:</strong> <code>{selectedItemId}</code>
-                  </p>
-
-                  {!editingLogin ? (
-                    <>
-                      <p>
-                        <strong>Name:</strong> {selectedLogin.name}
-                      </p>
-
-                      <p>
-                        <strong>Username:</strong> {selectedLogin.username}
-                      </p>
-
-                      <p>
-                        <strong>Password:</strong>{' '}
-                        {selectedLoginPasswordVisible ? (
-                          <code>{selectedLogin.password}</code>
-                        ) : (
-                          <code>••••••••••••</code>
-                        )}
-                      </p>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedLoginPasswordVisible((visible) => !visible);
-                        }}
-                      >
-                        {selectedLoginPasswordVisible ? 'Hide password' : 'Show password'}
-                      </button>
-
-                      <p>
-                        <strong>URLs:</strong>
-                      </p>
-
-                      {selectedLogin.urls.length === 0 ? (
-                        <p>None</p>
-                      ) : (
-                        <ul>
-                          {selectedLogin.urls.map((url) => (
-                            <li key={url}>{url}</li>
-                          ))}
-                        </ul>
-                      )}
-
-                      <p>
-                        <strong>Notes:</strong> {selectedLogin.notes}
-                      </p>
-
-                      <button type="button" disabled={loading} onClick={handleStartEditingLogin}>
-                        Edit
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={loading}
-                        onClick={() => {
-                          void handleDeleteLoginItem(selectedItemId);
-                        }}
-                      >
-                        Delete
-                      </button>
-
-                      <button type="button" onClick={handleCloseLoginItem}>
-                        Close
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <h4>Edit login</h4>
-
-                      <div>
-                        <label>
-                          Name
-                          <input
-                            ref={editNameRef}
-                            type="text"
-                            autoComplete="off"
-                            defaultValue={selectedLogin.name}
-                            onChange={scheduleEditLoginPasswordStrength}
-                          />
-                        </label>
-                      </div>
-
-                      <div>
-                        <label>
-                          Username
-                          <input
-                            ref={editUsernameRef}
-                            type="text"
-                            autoComplete="off"
-                            defaultValue={selectedLogin.username}
-                            onChange={scheduleEditLoginPasswordStrength}
-                          />
-                        </label>
-                      </div>
-
-                      <div>
-                        <label>
-                          Password
-                          <input
-                            ref={editPasswordRef}
-                            type={editLoginPasswordVisible ? 'text' : 'password'}
-                            autoComplete="off"
-                            defaultValue={selectedLogin.password}
-                            onChange={scheduleEditLoginPasswordStrength}
-                          />
-                        </label>
-
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={handleGenerateEditLoginPassword}
-                        >
-                          Generate password
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={loading}
-                          onClick={() => {
-                            setEditLoginPasswordVisible((visible) => !visible);
-                          }}
-                        >
-                          {editLoginPasswordVisible ? 'Hide password' : 'Show password'}
-                        </button>
-                      </div>
-
-                      <PasswordStrengthFeedback
-                        assessment={editLoginPasswordStrength}
-                        loading={editLoginPasswordStrengthLoading}
-                      />
-
-                      <div>
-                        <label>
-                          URL
-                          <input
-                            ref={editUrlRef}
-                            type="url"
-                            autoComplete="off"
-                            defaultValue={selectedLogin.urls[0] ?? ''}
-                            onChange={scheduleEditLoginPasswordStrength}
-                          />
-                        </label>
-                      </div>
-
-                      <div>
-                        <label>
-                          Notes
-                          <textarea ref={editNotesRef} defaultValue={selectedLogin.notes} />
-                        </label>
-                      </div>
-
-                      <button type="button" disabled={loading} onClick={handleUpdateLoginItem}>
-                        Save changes
-                      </button>
-
-                      <button type="button" disabled={loading} onClick={handleCancelEditingLogin}>
-                        Cancel
-                      </button>
-                    </>
-                  )}
-                </>
-              )}
-            </>
-          )}
-
-          {isSecurityRoute && (
-            <>
-              <hr />
-
-              <h3>Security settings</h3>
-
-              <p>
-                <strong>Vault status:</strong> Unlocked
-              </p>
-
-              <p>
-                Vault keys are currently available only inside the local WASM runtime for this
-                browser session.
-              </p>
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.vault);
-                }}
-              >
-                Back to vault
-              </button>
-
-              <hr />
-
-              <h4>Sessions</h4>
-
-              <p>Review and revoke authenticated sessions for your account.</p>
-
-              <button
-                type="button"
-                disabled={loading || securitySessionsLoading}
-                onClick={handleLoadSessions}
-              >
-                {securitySessionsLoading ? 'Loading sessions…' : 'Refresh sessions'}
-              </button>
-
-              {managedSessions.length > 1 && (
-                <button
-                  type="button"
-                  disabled={loading || securitySessionsLoading}
-                  onClick={handleRevokeOtherSessions}
-                >
-                  Sign out other sessions
-                </button>
-              )}
-
-              {managedSessions.length > 0 && (
-                <ul>
-                  {managedSessions.map((session) => (
-                    <li key={session.id}>
-                      <strong>{session.deviceLabel}</strong>
-                      {session.current && ' — Current session'}
-                      <br />
-                      Last active: {new Date(session.lastSeenAt).toLocaleString()}
-                      <br />
-                      Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
-                      <br />
-                      <button
-                        type="button"
-                        disabled={loading || securitySessionsLoading}
-                        onClick={() => {
-                          void handleRevokeManagedSession(session.id, session.current);
-                        }}
-                      >
-                        {session.current ? 'Sign out this session' : 'Sign out'}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <hr />
-
-              <h4>Master Password</h4>
-
-              <p>
-                Lock the vault before changing your Master Password. This removes unlocked vault
-                keys from memory before entering the key-management flow.
-              </p>
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  handleLockVault();
-
-                  navigate(routes.security, {
-                    replace: true,
-                  });
-                }}
-              >
-                Lock vault to change Master Password
-              </button>
-            </>
-          )}
-
-          {(isVaultRoute || isVaultItemRoute) && (
-            <>
-              <hr />
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  void handleSyncVaultItems();
-                }}
-              >
-                Sync changes
-              </button>
-            </>
-          )}
-
-          <hr />
-
-          <button type="button" onClick={handleLockVault}>
-            Lock vault
-          </button>
-
-          <button type="button" disabled={loading} onClick={handleLogout}>
-            Sign out
-          </button>
-        </section>
-      )}
-
-      {runtimeState === 'SIGNED_OUT' && (
-        <>
-          {isLoginRoute && (
-            <section>
-              <h2>Sign in</h2>
-
-              <p>Authenticate with your passkey.</p>
-
-              <button
-                type="button"
-                disabled={loading || !webAuthnSupported}
-                onClick={handlePasskeyLogin}
-              >
-                Sign in with passkey
-              </button>
-
-              <hr />
-
-              <p>Need an account?</p>
-
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() => {
-                  navigate(routes.register);
-                }}
-              >
-                Create account
-              </button>
-            </section>
-          )}
-
-          {isRegisterRoute && (
-            <>
-              {!registrationId && !completedAccount && (
-                <section>
-                  <h2>Create account</h2>
-
-                  <input
-                    type="email"
-                    value={email}
-                    placeholder="you@example.com"
-                    autoComplete="email"
-                    onChange={(event) => setEmail(event.target.value)}
-                  />
-
-                  <button
-                    type="button"
-                    disabled={loading || !email}
-                    onClick={startAccountRegistration}
-                  >
-                    Start registration
-                  </button>
-
                   <hr />
 
                   <button
                     type="button"
                     disabled={loading}
                     onClick={() => {
-                      navigate(routes.login);
+                      navigate(routes.vault);
                     }}
                   >
-                    Sign in instead
+                    Back to vault
                   </button>
-                </section>
+
+                  {loading && !selectedLogin && <p>Loading login…</p>}
+
+                  {!loading && !selectedLogin && <p>Vault item could not be loaded.</p>}
+
+                  {selectedLogin && selectedItemId && (
+                    <>
+                      <h3>Decrypted login</h3>
+
+                      <p>
+                        <strong>Item ID:</strong> <code>{selectedItemId}</code>
+                      </p>
+
+                      {!editingLogin ? (
+                        <>
+                          <p>
+                            <strong>Name:</strong> {selectedLogin.name}
+                          </p>
+
+                          <p>
+                            <strong>Username:</strong> {selectedLogin.username}
+                          </p>
+
+                          <p>
+                            <strong>Password:</strong>{' '}
+                            {selectedLoginPasswordVisible ? (
+                              <code>{selectedLogin.password}</code>
+                            ) : (
+                              <code>••••••••••••</code>
+                            )}
+                          </p>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedLoginPasswordVisible((visible) => !visible);
+                            }}
+                          >
+                            {selectedLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                          </button>
+
+                          <p>
+                            <strong>URLs:</strong>
+                          </p>
+
+                          {selectedLogin.urls.length === 0 ? (
+                            <p>None</p>
+                          ) : (
+                            <ul>
+                              {selectedLogin.urls.map((url) => (
+                                <li key={url}>{url}</li>
+                              ))}
+                            </ul>
+                          )}
+
+                          <p>
+                            <strong>Notes:</strong> {selectedLogin.notes}
+                          </p>
+
+                          <button
+                            type="button"
+                            disabled={loading}
+                            onClick={handleStartEditingLogin}
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={loading}
+                            onClick={() => {
+                              void handleDeleteLoginItem(selectedItemId);
+                            }}
+                          >
+                            Delete
+                          </button>
+
+                          <button type="button" onClick={handleCloseLoginItem}>
+                            Close
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <h4>Edit login</h4>
+
+                          <div>
+                            <label>
+                              Name
+                              <input
+                                ref={editNameRef}
+                                type="text"
+                                autoComplete="off"
+                                defaultValue={selectedLogin.name}
+                                onChange={scheduleEditLoginPasswordStrength}
+                              />
+                            </label>
+                          </div>
+
+                          <div>
+                            <label>
+                              Username
+                              <input
+                                ref={editUsernameRef}
+                                type="text"
+                                autoComplete="off"
+                                defaultValue={selectedLogin.username}
+                                onChange={scheduleEditLoginPasswordStrength}
+                              />
+                            </label>
+                          </div>
+
+                          <div>
+                            <label>
+                              Password
+                              <input
+                                ref={editPasswordRef}
+                                type={editLoginPasswordVisible ? 'text' : 'password'}
+                                autoComplete="off"
+                                defaultValue={selectedLogin.password}
+                                onChange={scheduleEditLoginPasswordStrength}
+                              />
+                            </label>
+
+                            <button
+                              type="button"
+                              disabled={loading}
+                              onClick={handleGenerateEditLoginPassword}
+                            >
+                              Generate password
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={loading}
+                              onClick={() => {
+                                setEditLoginPasswordVisible((visible) => !visible);
+                              }}
+                            >
+                              {editLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                            </button>
+                          </div>
+
+                          <PasswordStrengthFeedback
+                            assessment={editLoginPasswordStrength}
+                            loading={editLoginPasswordStrengthLoading}
+                          />
+
+                          <div>
+                            <label>
+                              URL
+                              <input
+                                ref={editUrlRef}
+                                type="url"
+                                autoComplete="off"
+                                defaultValue={selectedLogin.urls[0] ?? ''}
+                                onChange={scheduleEditLoginPasswordStrength}
+                              />
+                            </label>
+                          </div>
+
+                          <div>
+                            <label>
+                              Notes
+                              <textarea ref={editNotesRef} defaultValue={selectedLogin.notes} />
+                            </label>
+                          </div>
+
+                          <button type="button" disabled={loading} onClick={handleUpdateLoginItem}>
+                            Save changes
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={loading}
+                            onClick={handleCancelEditingLogin}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </>
               )}
 
-              {registrationId && !registrationToken && !bootstrapToken && !completedAccount && (
-                <section>
-                  <h2>Verify email</h2>
+              {isSecurityRoute && (
+                <>
+                  <hr />
 
-                  <p>Copy the local verification token from the API terminal.</p>
+                  <h3>Security settings</h3>
 
-                  <input
-                    type="text"
-                    value={verificationToken}
-                    placeholder="Verification token"
-                    onChange={(event) => setVerificationToken(event.target.value)}
-                  />
+                  <p>
+                    <strong>Vault status:</strong> Unlocked
+                  </p>
+
+                  <p>
+                    Vault keys are currently available only inside the local WASM runtime for this
+                    browser session.
+                  </p>
 
                   <button
                     type="button"
-                    disabled={loading || !verificationToken}
-                    onClick={verifyEmail}
+                    disabled={loading}
+                    onClick={() => {
+                      navigate(routes.vault);
+                    }}
                   >
-                    Verify email
+                    Back to vault
                   </button>
-                </section>
-              )}
 
-              {registrationToken && !bootstrapToken && !completedAccount && (
-                <section>
-                  <h2>Create passkey</h2>
+                  <hr />
+
+                  <h4>Sessions</h4>
+
+                  <p>Review and revoke authenticated sessions for your account.</p>
 
                   <button
                     type="button"
-                    disabled={loading || !webAuthnSupported}
-                    onClick={registerPasskey}
+                    disabled={loading || securitySessionsLoading}
+                    onClick={handleLoadSessions}
                   >
-                    Create passkey
+                    {securitySessionsLoading ? 'Loading sessions…' : 'Refresh sessions'}
                   </button>
-                </section>
+
+                  {managedSessions.length > 1 && (
+                    <button
+                      type="button"
+                      disabled={loading || securitySessionsLoading}
+                      onClick={handleRevokeOtherSessions}
+                    >
+                      Sign out other sessions
+                    </button>
+                  )}
+
+                  {managedSessions.length > 0 && (
+                    <ul>
+                      {managedSessions.map((session) => (
+                        <li key={session.id}>
+                          <strong>{session.deviceLabel}</strong>
+                          {session.current && ' — Current session'}
+                          <br />
+                          Last active: {new Date(session.lastSeenAt).toLocaleString()}
+                          <br />
+                          Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
+                          <br />
+                          <button
+                            type="button"
+                            disabled={loading || securitySessionsLoading}
+                            onClick={() => {
+                              void handleRevokeManagedSession(session.id, session.current);
+                            }}
+                          >
+                            {session.current ? 'Sign out this session' : 'Sign out'}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <hr />
+
+                  <h4>Master Password</h4>
+
+                  <p>
+                    Lock the vault before changing your Master Password. This removes unlocked vault
+                    keys from memory before entering the key-management flow.
+                  </p>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      handleLockVault();
+
+                      navigate(routes.security, {
+                        replace: true,
+                      });
+                    }}
+                  >
+                    Lock vault to change Master Password
+                  </button>
+                </>
               )}
 
-              {bootstrapToken && !bootstrapOptions && !completedAccount && (
-                <section>
-                  <h2>Protect your vault</h2>
+              {(isVaultRoute || isVaultItemRoute) && (
+                <>
+                  <hr />
 
-                  <p>Your Master Password never leaves this browser.</p>
-
-                  <input
-                    ref={masterPasswordRef}
-                    type="password"
-                    placeholder="Master Password"
-                    autoComplete="new-password"
-                  />
-
-                  <input
-                    ref={confirmMasterPasswordRef}
-                    type="password"
-                    placeholder="Confirm Master Password"
-                    autoComplete="new-password"
-                  />
-
-                  <button type="button" disabled={loading} onClick={prepareCryptoBootstrap}>
-                    Create vault keys
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      void handleSyncVaultItems();
+                    }}
+                  >
+                    Sync changes
                   </button>
-                </section>
+                </>
               )}
 
-              {bootstrapOptions && !recoveryKitDownloaded && !completedAccount && (
-                <section>
-                  <h2>Save Recovery Kit</h2>
+              <hr />
 
-                  <p>Store it securely and separately from your Master Password.</p>
+              <button type="button" onClick={handleLockVault}>
+                Lock vault
+              </button>
 
-                  <button type="button" disabled={loading} onClick={saveRecoveryKit}>
-                    Download Recovery Kit
-                  </button>
-                </section>
-              )}
-
-              {bootstrapOptions && recoveryKitDownloaded && !completedAccount && (
-                <section>
-                  <h2>Activate account</h2>
-
-                  <button type="button" disabled={loading} onClick={activateAccount}>
-                    Activate account
-                  </button>
-                </section>
-              )}
-
-              {completedAccount && (
-                <section>
-                  <h2>Account ready</h2>
-
-                  <p>Your encrypted personal vault has been created.</p>
-
-                  <button type="button" onClick={finishOnboarding}>
-                    Continue to sign in
-                  </button>
-                </section>
-              )}
-            </>
+              <button type="button" disabled={loading} onClick={handleLogout}>
+                Sign out
+              </button>
+            </section>
           )}
-        </>
+        </AppShell>
       )}
 
       {!webAuthnSupported && <p role="alert">This browser does not support WebAuthn.</p>}
 
-      {message && <p>{message}</p>}
+      {message && (
+        <p className="app-message" role="status">
+          {message}
+        </p>
+      )}
 
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <p className="app-alert" role="alert">
+          {error}
+        </p>
+      )}
     </main>
   );
 }
