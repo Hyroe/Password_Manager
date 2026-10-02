@@ -92,9 +92,15 @@ describe('safe API error handling', () => {
       },
     });
 
-    expect(
-      events.some((event) => event.event === 'http.request.error' && event.code === 'INVALID_JSON'),
-    ).toBe(true);
+    const errorEvent = events.find((event) => event.event === 'http.request.error');
+
+    expect(errorEvent).toMatchObject({
+      level: 'warn',
+      event: 'http.request.error',
+      requestId: response.headers['x-request-id'],
+      statusCode: 400,
+      code: 'INVALID_JSON',
+    });
   });
 
   it('returns a safe error for oversized request bodies', async () => {
@@ -133,10 +139,14 @@ describe('safe API error handling', () => {
       },
     });
 
-    expect(
-      events.some(
-        (event) => event.event === 'http.request.error' && event.code === 'PAYLOAD_TOO_LARGE',
-      ),
-    ).toBe(true);
+    const errorEvent = events.find((event) => event.event === 'http.request.error');
+
+    expect(errorEvent).toMatchObject({
+      level: 'warn',
+      event: 'http.request.error',
+      requestId: response.headers['x-request-id'],
+      statusCode: 413,
+      code: 'PAYLOAD_TOO_LARGE',
+    });
   });
 });

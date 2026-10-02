@@ -34,7 +34,21 @@ export interface StructuredLogger {
 
 export const consoleStructuredLogger: StructuredLogger = {
   write(event) {
-    console.info(JSON.stringify(event));
+    const message = JSON.stringify(event);
+
+    switch (event.level) {
+      case 'error':
+        console.error(message);
+        break;
+
+      case 'warn':
+        console.warn(message);
+        break;
+
+      case 'info':
+        console.info(message);
+        break;
+    }
   },
 };
 
