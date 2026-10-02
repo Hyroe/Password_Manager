@@ -25,6 +25,9 @@ import { createAuthRateLimiters } from './security/authRateLimits.js';
 import type { RateLimitStoreFactory } from './security/rateLimit.js';
 import { createSensitiveRateLimiters } from './security/sensitiveRateLimits.js';
 
+import { getEnvironment } from './config/env.js';
+import { assertRuntimeDependencies } from './config/startup.js';
+
 interface AppDependencies {
   emailSender?: EmailSender;
   webAuthnProvider?: WebAuthnProvider;
@@ -34,6 +37,14 @@ interface AppDependencies {
 }
 
 export function createApp(dependencies: AppDependencies = {}) {
+  const environment = getEnvironment();
+
+  const emailSender = dependencies.emailSender ?? noopEmailSender;
+
+  assertRuntimeDependencies(environment, {
+    emailSender,
+  });
+
   const app = express();
 
   app.set('trust proxy', resolveTrustProxy());
@@ -48,7 +59,6 @@ export function createApp(dependencies: AppDependencies = {}) {
 
   app.use(requireCsrfForBrowserMutation);
 
-  const emailSender = dependencies.emailSender ?? noopEmailSender;
   const webAuthnProvider = dependencies.webAuthnProvider ?? simpleWebAuthnProvider;
   const passkeyAuthenticationProvider =
     dependencies.passkeyAuthenticationProvider ?? simplePasskeyAuthenticationProvider;
@@ -87,5 +97,3 @@ export function createApp(dependencies: AppDependencies = {}) {
 
   return app;
 }
-
-export const app = createApp();

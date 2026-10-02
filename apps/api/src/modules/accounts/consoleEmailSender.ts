@@ -1,6 +1,8 @@
 import type { EmailSender } from './emailSender.js';
 
 export const consoleEmailSender: EmailSender = {
+  productionSafe: false,
+
   async sendVerificationEmail(message) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('Console email sender cannot be used in production');
