@@ -40,24 +40,82 @@ const trustProxyHopsSchema = z.preprocess(
     .optional(),
 );
 
-const environmentSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+const environmentSchema = z
+  .object({
+    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
-  PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
+    PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
 
-  DATABASE_URL: requiredString('DATABASE_URL is required.'),
+    DATABASE_URL: requiredString('DATABASE_URL is required.'),
 
-  WEBAUTHN_RP_NAME: requiredString('WEBAUTHN_RP_NAME is required.'),
+    WEBAUTHN_RP_NAME: requiredString('WEBAUTHN_RP_NAME is required.'),
 
-  WEBAUTHN_RP_ID: requiredString('WEBAUTHN_RP_ID is required.'),
-  WEBAUTHN_ORIGIN: requiredString('WEBAUTHN_ORIGIN is required.').pipe(
-    z.string().url({
-      message: 'WEBAUTHN_ORIGIN must be a valid URL.',
-    }),
-  ),
+    WEBAUTHN_RP_ID: requiredString('WEBAUTHN_RP_ID is required.'),
 
-  TRUST_PROXY_HOPS: trustProxyHopsSchema,
-});
+    WEBAUTHN_ORIGIN: requiredString('WEBAUTHN_ORIGIN is required.').pipe(
+      z.string().url({
+        message: 'WEBAUTHN_ORIGIN must be a valid URL.',
+      }),
+    ),
+
+    TRUST_PROXY_HOPS: trustProxyHopsSchema,
+  })
+  .superRefine((environment, context) => {
+    if (!URL.canParse(environment.WEBAUTHN_ORIGIN)) {
+      return;
+    }
+
+    const origin = new URL(environment.WEBAUTHN_ORIGIN);
+
+    if (
+      origin.username ||
+      origin.password ||
+      origin.pathname !== '/' ||
+      origin.search ||
+      origin.hash
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WEBAUTHN_ORIGIN'],
+        message: 'WEBAUTHN_ORIGIN must be an origin without credentials, path, query, or fragment.',
+      });
+    }
+
+    if (environment.NODE_ENV !== 'production') {
+      return;
+    }
+
+    if (origin.protocol !== 'https:') {
+      context.addIssue({
+        code: 'custom',
+        path: ['WEBAUTHN_ORIGIN'],
+        message: 'WEBAUTHN_ORIGIN must use HTTPS in production.',
+      });
+    }
+
+    const rpID = environment.WEBAUTHN_RP_ID.toLowerCase();
+    const originHostname = origin.hostname.toLowerCase();
+
+    if (rpID === 'localhost') {
+      context.addIssue({
+        code: 'custom',
+        path: ['WEBAUTHN_RP_ID'],
+        message: 'WEBAUTHN_RP_ID cannot be localhost in production.',
+      });
+
+      return;
+    }
+
+    const rpIdMatchesOrigin = originHostname === rpID || originHostname.endsWith(`.${rpID}`);
+
+    if (!rpIdMatchesOrigin) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WEBAUTHN_RP_ID'],
+        message: 'WEBAUTHN_RP_ID must match or be a parent domain of WEBAUTHN_ORIGIN.',
+      });
+    }
+  });
 
 export type Environment = z.infer<typeof environmentSchema>;
 

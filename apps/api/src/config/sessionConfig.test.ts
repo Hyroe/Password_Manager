@@ -11,9 +11,17 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+function stubProductionEnvironment(): void {
+  vi.stubEnv('NODE_ENV', 'production');
+
+  vi.stubEnv('WEBAUTHN_RP_ID', 'example.com');
+
+  vi.stubEnv('WEBAUTHN_ORIGIN', 'https://vault.example.com');
+}
+
 describe('session cookie policy', () => {
   it('uses the hardened __Host cookie in production', () => {
-    vi.stubEnv('NODE_ENV', 'production');
+    stubProductionEnvironment();
 
     expect(sessionCookieName()).toBe('__Host-pm_session');
 
@@ -45,7 +53,7 @@ describe('session cookie policy', () => {
   });
 
   it('clears the cookie using the same security attributes', () => {
-    vi.stubEnv('NODE_ENV', 'production');
+    stubProductionEnvironment();
 
     const options = sessionCookieClearOptions();
 

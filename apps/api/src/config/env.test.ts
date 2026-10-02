@@ -18,6 +18,18 @@ function validEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
+function validProductionEnvironment(): NodeJS.ProcessEnv {
+  return {
+    ...validEnvironment(),
+
+    NODE_ENV: 'production',
+
+    WEBAUTHN_RP_ID: 'example.com',
+
+    WEBAUTHN_ORIGIN: 'https://vault.example.com',
+  };
+}
+
 describe('environment configuration', () => {
   it('parses valid runtime configuration', () => {
     const environment = parseEnvironment(validEnvironment());
@@ -118,5 +130,99 @@ describe('environment configuration', () => {
     expect(thrown).toBeInstanceOf(Error);
 
     expect((thrown as Error).message).not.toContain(secretValue);
+  });
+  it('accepts a production origin that exactly matches the RP ID', () => {
+    const environment = parseEnvironment({
+      ...validProductionEnvironment(),
+
+      WEBAUTHN_RP_ID: 'vault.example.com',
+
+      WEBAUTHN_ORIGIN: 'https://vault.example.com',
+    });
+
+    expect(environment.NODE_ENV).toBe('production');
+
+    expect(environment.WEBAUTHN_RP_ID).toBe('vault.example.com');
+
+    expect(environment.WEBAUTHN_ORIGIN).toBe('https://vault.example.com');
+  });
+
+  it('accepts a production origin below the configured parent RP ID', () => {
+    const environment = parseEnvironment(validProductionEnvironment());
+
+    expect(environment.WEBAUTHN_RP_ID).toBe('example.com');
+
+    expect(environment.WEBAUTHN_ORIGIN).toBe('https://vault.example.com');
+  });
+
+  it('rejects an insecure production WebAuthn origin', () => {
+    expect(() =>
+      parseEnvironment({
+        ...validProductionEnvironment(),
+
+        WEBAUTHN_ORIGIN: 'http://vault.example.com',
+      }),
+    ).toThrow('WEBAUTHN_ORIGIN must use HTTPS in production.');
+  });
+
+  it('rejects localhost as the production RP ID', () => {
+    expect(() =>
+      parseEnvironment({
+        ...validProductionEnvironment(),
+
+        WEBAUTHN_RP_ID: 'localhost',
+
+        WEBAUTHN_ORIGIN: 'https://localhost',
+      }),
+    ).toThrow('WEBAUTHN_RP_ID cannot be localhost in production.');
+  });
+
+  it('rejects a production origin outside the RP ID domain', () => {
+    expect(() =>
+      parseEnvironment({
+        ...validProductionEnvironment(),
+
+        WEBAUTHN_RP_ID: 'example.com',
+
+        WEBAUTHN_ORIGIN: 'https://attacker.example',
+      }),
+    ).toThrow('WEBAUTHN_RP_ID must match or be a parent domain of WEBAUTHN_ORIGIN.');
+  });
+
+  it('does not accept a hostname suffix lookalike as the RP ID domain', () => {
+    expect(() =>
+      parseEnvironment({
+        ...validProductionEnvironment(),
+
+        WEBAUTHN_RP_ID: 'example.com',
+
+        WEBAUTHN_ORIGIN: 'https://evil-example.com',
+      }),
+    ).toThrow('WEBAUTHN_RP_ID must match or be a parent domain of WEBAUTHN_ORIGIN.');
+  });
+
+  it.each([
+    'https://user:password@vault.example.com',
+    'https://vault.example.com/path',
+    'https://vault.example.com?debug=true',
+    'https://vault.example.com#fragment',
+  ])('rejects WEBAUTHN_ORIGIN that is not a bare origin: %s', (origin) => {
+    expect(() =>
+      parseEnvironment({
+        ...validProductionEnvironment(),
+
+        WEBAUTHN_ORIGIN: origin,
+      }),
+    ).toThrow('WEBAUTHN_ORIGIN must be an origin without credentials, path, query, or fragment.');
+  });
+
+  it('continues to allow HTTP localhost configuration outside production', () => {
+    const environment = parseEnvironment(validEnvironment());
+
+    expect(environment.NODE_ENV).toBe('test');
+
+    expect(environment.WEBAUTHN_RP_ID).toBe('localhost');
+
+    expect(environment.WEBAUTHN_ORIGIN).toBe('http://localhost:5173');
   });
 });

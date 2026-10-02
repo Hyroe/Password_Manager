@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../app.js';
 
+function stubProductionEnvironment(): void {
+  vi.stubEnv('NODE_ENV', 'production');
+  vi.stubEnv('WEBAUTHN_RP_ID', 'example.com');
+  vi.stubEnv('WEBAUTHN_ORIGIN', 'https://vault.example.com');
+}
+
 describe('HTTP security headers', () => {
   it('applies the browser security baseline', async () => {
     const response = await request(createApp()).get('/api/v1/health').expect(200);
@@ -46,7 +52,7 @@ describe('HTTP security headers', () => {
     expect(response.headers['strict-transport-security']).toBeUndefined();
   });
   it('enables HTTPS-oriented protections in production', async () => {
-    vi.stubEnv('NODE_ENV', 'production');
+    stubProductionEnvironment();
 
     const response = await request(createApp()).get('/api/v1/health').expect(200);
 
