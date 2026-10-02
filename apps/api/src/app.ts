@@ -27,6 +27,7 @@ import { createSensitiveRateLimiters } from './security/sensitiveRateLimits.js';
 
 import { getEnvironment } from './config/env.js';
 import { assertRuntimeDependencies } from './config/startup.js';
+import { createRequestIdMiddleware } from './observability/requestId.js';
 
 interface AppDependencies {
   emailSender?: EmailSender;
@@ -50,6 +51,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.set('trust proxy', resolveTrustProxy());
 
   app.disable('x-powered-by');
+
+  app.use(createRequestIdMiddleware());
 
   app.use(createHttpSecurityHeaders());
 
