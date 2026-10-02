@@ -35,6 +35,7 @@ import {
 } from './observability/logger.js';
 
 import { createHttpRequestLoggingMiddleware } from './observability/httpRequestLogging.js';
+import { createErrorHandler } from './observability/errorHandler.js';
 
 interface AppDependencies {
   emailSender?: EmailSender;
@@ -112,6 +113,8 @@ export function createApp(dependencies: AppDependencies = {}) {
   app.use('/api/v1/crypto', createVaultUnlockRouter(sensitiveRateLimits));
 
   app.use('/api/v1/vaults', createVaultItemRouter());
+
+  app.use(createErrorHandler(logger));
 
   return app;
 }

@@ -16,7 +16,17 @@ export interface HttpRequestCompletedLogEvent {
   durationMs: number;
 }
 
-export type StructuredLogEvent = ApiStartedLogEvent | HttpRequestCompletedLogEvent;
+export interface HttpRequestErrorLogEvent {
+  timestamp: string;
+  level: 'warn' | 'error';
+  event: 'http.request.error';
+  requestId: string;
+  statusCode: number;
+  code: 'INVALID_JSON' | 'PAYLOAD_TOO_LARGE' | 'INTERNAL_ERROR';
+}
+
+export type StructuredLogEvent =
+  ApiStartedLogEvent | HttpRequestCompletedLogEvent | HttpRequestErrorLogEvent;
 
 export interface StructuredLogger {
   write(event: StructuredLogEvent): void;
