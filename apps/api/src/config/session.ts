@@ -6,17 +6,26 @@ export const SESSION_ABSOLUTE_TTL_MS = 12 * 60 * 60 * 1000;
 
 export const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
 
+import { getEnvironment } from './env.js';
+
 export function sessionCookieName(): string {
-  return process.env.NODE_ENV === 'production' ? '__Host-pm_session' : 'pm_session';
+  return isProduction() ? '__Host-pm_session' : 'pm_session';
 }
 
 function sessionCookieBaseOptions(): CookieOptions {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+
+    secure: isProduction(),
+
     sameSite: 'strict',
+
     path: '/',
   };
+}
+
+function isProduction(): boolean {
+  return getEnvironment().NODE_ENV === 'production';
 }
 
 export function sessionCookieOptions(): CookieOptions {

@@ -1,13 +1,11 @@
-const rpName = process.env.WEBAUTHN_RP_NAME;
-const rpID = process.env.WEBAUTHN_RP_ID;
-const origin = process.env.WEBAUTHN_ORIGIN;
+import { getEnvironment } from './env.js';
 
-if (!rpName || !rpID || !origin) {
-  throw new Error('WebAuthn configuration is required');
-}
+const environment = getEnvironment();
 
 export const webAuthnConfig = {
-  rpName,
-  rpID,
-  origin,
+  rpName: environment.WEBAUTHN_RP_NAME,
+
+  rpID: environment.WEBAUTHN_RP_ID,
+
+  origin: environment.WEBAUTHN_ORIGIN,
 };
