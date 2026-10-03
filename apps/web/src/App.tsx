@@ -22,6 +22,7 @@ import { AuthCard } from './components/auth/AuthCard';
 import { RegistrationProgress } from './components/auth/RegistrationProgress';
 import { VaultItemRow } from './components/vault/VaultItemRow';
 import { AppNotifications } from './components/common/AppNotifications';
+import { ConfirmationDialog } from './components/common/ConfirmationDialog';
 
 import {
   browserSupportsWebAuthn,
@@ -143,6 +144,15 @@ interface PasswordStrengthFeedbackProps {
   loading: boolean;
 }
 
+type PendingConfirmation =
+  | {
+      kind: 'DELETE_LOGIN';
+      itemId: string;
+    }
+  | {
+      kind: 'RECOVER_MASTER_PASSWORD';
+    };
+
 function PasswordStrengthFeedback({ assessment, loading }: PasswordStrengthFeedbackProps) {
   if (loading) {
     return <p aria-live="polite">Evaluating password strength…</p>;
@@ -206,6 +216,8 @@ export default function App() {
   const [error, setError] = useState('');
 
   const [loading, setLoading] = useState(false);
+
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
   const masterPasswordRef = useRef<HTMLInputElement>(null);
 
@@ -772,12 +784,11 @@ export default function App() {
     [clearVaultUiState, disposeUnlockedVault],
   );
 
-  async function handleDeleteLoginItem(itemId: string) {
+  function handleDeleteLoginItem(itemId: string) {
     const vaultId = unlockedVaultIdRef.current;
 
     if (!vaultId) {
       setError('Vault is locked.');
-
       return;
     }
 
@@ -785,32 +796,39 @@ export default function App() {
 
     if (!item) {
       setError('Vault item metadata is unavailable.');
-
-      return;
-    }
-
-    const confirmed = window.confirm(
-      'Delete this login? The encrypted history will be retained for recovery.',
-    );
-
-    if (!confirmed) {
       return;
     }
 
     resetMessages();
 
+    setPendingConfirmation({
+      kind: 'DELETE_LOGIN',
+      itemId,
+    });
+  }
+
+  async function confirmDeleteLoginItem(itemId: string) {
+    const vaultId = unlockedVaultIdRef.current;
+
+    if (!vaultId) {
+      setPendingConfirmation(null);
+      setError('Vault is locked.');
+      return;
+    }
+
+    const item = vaultItems.find((entry) => entry.id === itemId);
+
+    if (!item) {
+      setPendingConfirmation(null);
+      setError('Vault item metadata is unavailable.');
+      return;
+    }
+
+    resetMessages();
     setLoading(true);
 
     try {
       await deleteVaultItem(vaultId, itemId, item.revisionNumber);
-
-      /*
-
-        * Drop decrypted plaintext immediately
-
-        * when the selected item is deleted.
-
-        */
 
       if (selectedItemId === itemId) {
         selectedItemIdRef.current = null;
@@ -830,29 +848,16 @@ export default function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
-
         clearVaultUiState();
 
         setAuthenticatedUser(null);
-
         setRuntimeState('SIGNED_OUT');
 
         setError('Your session has expired. Authenticate again.');
-
         return;
       }
 
       if (error instanceof ApiError && error.code === 'ITEM_REVISION_CONFLICT') {
-        /*
-
-          * Another client changed the item.
-
-          * Do not allow this stale tab to keep
-
-          * operating on the old plaintext.
-
-          */
-
         const deletingSelectedItem = selectedItemId === itemId;
 
         if (deletingSelectedItem) {
@@ -871,6 +876,7 @@ export default function App() {
         } catch {
           vaultItemsRef.current = [];
           deletedVaultItemsRef.current = [];
+
           setVaultItems([]);
           setDeletedVaultItems([]);
         }
@@ -917,6 +923,7 @@ export default function App() {
 
       setError(error instanceof Error ? error.message : 'Login could not be deleted.');
     } finally {
+      setPendingConfirmation(null);
       setLoading(false);
     }
   }
@@ -1720,40 +1727,63 @@ export default function App() {
     }
   }
 
-  async function handleRecoverMasterPassword() {
+  function handleRecoverMasterPassword() {
     const user = authenticatedUser;
-
     const recoveryKit = recoveryKitRef.current;
 
     const newMasterPassword = recoveryNewMasterPasswordRef.current?.value ?? '';
-
     const confirmation = recoveryConfirmMasterPasswordRef.current?.value ?? '';
 
     resetMessages();
 
     if (!user || !recoveryKit) {
       setError('Recovery Kit is required.');
-
       return;
     }
 
     if (newMasterPassword.length < 12) {
       setError('New Master Password must contain at least 12 characters.');
-
       return;
     }
 
     if (newMasterPassword !== confirmation) {
       setError('Master Password confirmation does not match.');
-
       return;
     }
 
-    const confirmed = window.confirm(
-      'Recover your Master Password? This will replace the current Master Password and sign out every authenticated session.',
-    );
+    setPendingConfirmation({
+      kind: 'RECOVER_MASTER_PASSWORD',
+    });
+  }
 
-    if (!confirmed) {
+  async function confirmRecoverMasterPassword() {
+    const user = authenticatedUser;
+    const recoveryKit = recoveryKitRef.current;
+
+    const newMasterPassword = recoveryNewMasterPasswordRef.current?.value ?? '';
+    const confirmation = recoveryConfirmMasterPasswordRef.current?.value ?? '';
+
+    resetMessages();
+
+    /*
+     * Re-read and validate directly from the uncontrolled inputs.
+     * Password plaintext is never copied into React state.
+     */
+    if (!user || !recoveryKit) {
+      setPendingConfirmation(null);
+      setError('Recovery Kit is required.');
+      return;
+    }
+
+    if (newMasterPassword.length < 12) {
+      setPendingConfirmation(null);
+      setError('New Master Password must contain at least 12 characters.');
+      return;
+    }
+
+    if (newMasterPassword !== confirmation) {
+      setPendingConfirmation(null);
+      setError('Master Password confirmation does not match.');
       return;
     }
 
@@ -1762,37 +1792,22 @@ export default function App() {
     try {
       await recoverVaultMasterPassword({
         newMasterPassword,
-
         recoveryKit,
-
         authenticatedEmail: user.email,
       });
 
-      /*
-       * Recovery revokes every authenticated
-       * server session. No authenticated or
-       * decrypted client state may survive.
-       */
       disposeUnlockedVault();
-
       clearVaultUiState();
-
       discardRecoveryFlowState();
 
-      /*
-       * Invalidate any outstanding Security
-       * session request before removing its UI state.
-       */
       securitySessionsRequestRef.current += 1;
 
       setManagedSessions([]);
 
       setAuthenticatedUser(null);
-
       setRuntimeState('SIGNED_OUT');
 
       setError('');
-
       setMessage('Master Password recovered successfully. Sign in again with your passkey.');
 
       navigate(routes.login, {
@@ -1801,9 +1816,7 @@ export default function App() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         disposeUnlockedVault();
-
         clearVaultUiState();
-
         discardRecoveryFlowState();
 
         securitySessionsRequestRef.current += 1;
@@ -1811,7 +1824,6 @@ export default function App() {
         setManagedSessions([]);
 
         setAuthenticatedUser(null);
-
         setRuntimeState('SIGNED_OUT');
 
         setMessage('');
@@ -1843,10 +1855,6 @@ export default function App() {
 
       setError(error instanceof Error ? error.message : 'Master Password recovery failed.');
     } finally {
-      /*
-       * Password plaintext must not survive
-       * any recovery attempt.
-       */
       if (recoveryNewMasterPasswordRef.current) {
         recoveryNewMasterPasswordRef.current.value = '';
       }
@@ -1855,6 +1863,7 @@ export default function App() {
         recoveryConfirmMasterPasswordRef.current.value = '';
       }
 
+      setPendingConfirmation(null);
       setLoading(false);
     }
   }
@@ -4519,6 +4528,41 @@ export default function App() {
           )}
         </AppShell>
       )}
+
+      <ConfirmationDialog
+        open={pendingConfirmation !== null}
+        title={
+          pendingConfirmation?.kind === 'RECOVER_MASTER_PASSWORD'
+            ? 'Recover your Master Password?'
+            : 'Delete this login?'
+        }
+        description={
+          pendingConfirmation?.kind === 'RECOVER_MASTER_PASSWORD'
+            ? 'This will replace your current Master Password and sign out every authenticated session.'
+            : 'The login will be removed from the active vault. Its encrypted deletion history will remain available for recovery and synchronization.'
+        }
+        confirmLabel={
+          pendingConfirmation?.kind === 'RECOVER_MASTER_PASSWORD'
+            ? 'Recover Master Password'
+            : 'Delete login'
+        }
+        busy={loading}
+        onCancel={() => {
+          setPendingConfirmation(null);
+        }}
+        onConfirm={() => {
+          if (!pendingConfirmation) {
+            return;
+          }
+
+          if (pendingConfirmation.kind === 'DELETE_LOGIN') {
+            void confirmDeleteLoginItem(pendingConfirmation.itemId);
+            return;
+          }
+
+          void confirmRecoverMasterPassword();
+        }}
+      />
 
       <AppNotifications
         message={message}
