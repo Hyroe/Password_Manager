@@ -337,6 +337,10 @@ export default function App() {
 
   const vaultSearchBuildPromiseRef = useRef<Promise<void> | null>(null);
 
+  const credentialImportGenerationRef = useRef(0);
+
+  const credentialImportPromiseRef = useRef<Promise<unknown> | null>(null);
+
   const location = useLocation();
 
   const navigate = useNavigate();
@@ -740,23 +744,38 @@ export default function App() {
 
     /*
      * Prevent new vault operations from starting immediately.
-     * If a local search-index decrypt is already in flight,
-     * keep this WASM instance alive until that build settles.
+     *
+     * If a local decrypt/index operation or credential import
+     * is already in flight, keep this WASM instance alive until
+     * those operations settle.
      */
     unlockedVaultRef.current = null;
     unlockedVaultIdRef.current = null;
 
     vaultSearchGenerationRef.current += 1;
+    credentialImportGenerationRef.current += 1;
 
     const searchBuild = vaultSearchBuildPromiseRef.current;
+
+    const importExecution = credentialImportPromiseRef.current;
 
     const dispose = () => {
       unlocked.clear();
       unlocked.free();
     };
 
+    const pendingVaultOperations: Promise<unknown>[] = [];
+
     if (searchBuild) {
-      void searchBuild.then(dispose, dispose);
+      pendingVaultOperations.push(searchBuild);
+    }
+
+    if (importExecution) {
+      pendingVaultOperations.push(importExecution);
+    }
+
+    if (pendingVaultOperations.length > 0) {
+      void Promise.allSettled(pendingVaultOperations).then(dispose);
 
       return;
     }

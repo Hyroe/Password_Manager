@@ -12,7 +12,9 @@ export type CredentialImportErrorCode =
   | 'UNSUPPORTED_FORMAT'
   | 'DUPLICATE_HEADER'
   | 'TOO_MANY_HEADERS'
-  | 'TOO_MANY_ROWS';
+  | 'TOO_MANY_ROWS'
+  | 'FILE_TOO_LARGE'
+  | 'FILE_READ_FAILED';
 
 export type CredentialImportRowIssue = 'INVALID_ROW' | 'MISSING_REQUIRED_FIELD' | 'FIELD_TOO_LARGE';
 
