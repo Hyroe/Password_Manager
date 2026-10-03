@@ -1,0 +1,11 @@
+name,url,username,password,note
+GitHub,https://github.com,octocat@example.com,FakeGitHubPassword!123,Cuenta de desarrollo
+Google,https://accounts.google.com,user.fake@gmail.com,MyS3cretP@ss!,Correo principal
+Amazon,https://www.amazon.com,shopper@example.com,Amaz0n#2024,Compras personales
+Netflix,https://www.netflix.com,streamer@example.com,netflix123,Plan familiar
+Twitter,https://twitter.com,@fakehandle,Tw1tter!Pass,Cuenta secundaria
+LinkedIn,https://www.linkedin.com,in/john-doe,LinkedIn$2024,Perfil profesional
+Facebook,https://www.facebook.com,john.doe.123,FB_P@ssw0rd,Cuenta antigua
+Instagram,https://www.instagram.com,johndoe_photos,1nst@gr@m!,Fotos de viajes
+Reddit,https://www.reddit.com,u/fakeuser,Reddit#2024,Foros y noticias
+Stack Overflow,https://stackoverflow.com,dev@example.com,St@ck0verflow!,Cuenta de desarrollador
