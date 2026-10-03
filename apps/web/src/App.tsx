@@ -21,6 +21,7 @@ import { AuthShell } from './components/layout/AuthShell';
 import { AuthCard } from './components/auth/AuthCard';
 import { RegistrationProgress } from './components/auth/RegistrationProgress';
 import { VaultItemRow } from './components/vault/VaultItemRow';
+import { AppNotifications } from './components/common/AppNotifications';
 
 import {
   browserSupportsWebAuthn,
@@ -3275,63 +3276,125 @@ export default function App() {
           {runtimeState === 'AUTHENTICATED_LOCKED' && authenticatedUser && (
             <div className="workspace-route">
               {isVaultRoute && (
-                <section className="route-panel">
-                  <h2>Vault locked</h2>
+                <div className="locked-vault-route">
+                  <section className="locked-vault-card">
+                    <div className="locked-vault-card__icon" aria-hidden="true">
+                      ◇
+                    </div>
 
-                  <p>
-                    Signed in as <strong>{authenticatedUser.email}</strong>
-                  </p>
+                    <header className="locked-vault-card__header">
+                      <span className="locked-vault-card__eyebrow">Private vault</span>
+                      <h2>Unlock your vault</h2>
+                      <p>
+                        Your account is authenticated. Load your Recovery Kit and enter your Master
+                        Password to make your encryption keys available locally.
+                      </p>
+                    </header>
 
-                  <p>Your identity is authenticated, but your vault keys are not loaded.</p>
-                  <label>
-                    Recovery Kit
-                    <input
-                      ref={recoveryKitFileRef}
-                      type="file"
-                      accept=".json,application/json"
-                      onChange={(event) => {
-                        void handleRecoveryKitFile(event.target.files?.[0]);
-                      }}
-                    />
-                  </label>
+                    <div className="locked-vault-security-note">
+                      <span className="locked-vault-security-note__icon" aria-hidden="true">
+                        ◇
+                      </span>
 
-                  {recoveryKitLoaded && (
-                    <>
-                      <input
-                        ref={unlockMasterPasswordRef}
-                        type="password"
-                        placeholder="Master Password"
-                        autoComplete="current-password"
-                      />
+                      <div>
+                        <strong>Local decryption only</strong>
+                        <p>
+                          Your Recovery Kit and Master Password are processed inside this browser.
+                        </p>
+                      </div>
+                    </div>
 
-                      <button type="button" disabled={loading} onClick={handleUnlockVault}>
-                        Unlock vault
+                    {!recoveryKitLoaded ? (
+                      <div className="locked-vault-step">
+                        <div className="locked-vault-step__heading">
+                          <span className="locked-vault-step__number">1</span>
+
+                          <div>
+                            <strong>Load Recovery Kit</strong>
+                            <span>Select the Recovery Kit created during account setup.</span>
+                          </div>
+                        </div>
+
+                        <label className="locked-vault-file-field">
+                          Recovery Kit
+                          <input
+                            ref={recoveryKitFileRef}
+                            type="file"
+                            accept=".json,application/json"
+                            onChange={(event) => {
+                              void handleRecoveryKitFile(event.target.files?.[0]);
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="locked-vault-kit-ready">
+                          <span className="locked-vault-kit-ready__check">✓</span>
+
+                          <div>
+                            <strong>Recovery Kit ready</strong>
+                            <span>Loaded locally for this unlock attempt.</span>
+                          </div>
+                        </div>
+
+                        <div className="locked-vault-step">
+                          <div className="locked-vault-step__heading">
+                            <span className="locked-vault-step__number">2</span>
+
+                            <div>
+                              <strong>Enter Master Password</strong>
+                              <span>Used locally to unlock your account root key.</span>
+                            </div>
+                          </div>
+
+                          <label>
+                            Master Password
+                            <input
+                              ref={unlockMasterPasswordRef}
+                              type="password"
+                              placeholder="Master Password"
+                              autoComplete="current-password"
+                            />
+                          </label>
+
+                          <button
+                            className="button-primary button-full"
+                            type="button"
+                            disabled={loading}
+                            onClick={handleUnlockVault}
+                          >
+                            {loading ? 'Unlocking…' : 'Unlock vault'}
+                          </button>
+                        </div>
+                      </>
+                    )}
+
+                    <footer className="locked-vault-card__footer">
+                      <button
+                        className="vault-text-action"
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          navigate(routes.security);
+                        }}
+                      >
+                        Security settings
                       </button>
-                    </>
-                  )}
 
-                  <hr />
-
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      navigate(routes.security);
-                    }}
-                  >
-                    Security settings
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      navigate(routes.recovery);
-                    }}
-                  >
-                    Recover Master Password
-                  </button>
-                </section>
+                      <button
+                        className="vault-text-action"
+                        type="button"
+                        disabled={loading}
+                        onClick={() => {
+                          navigate(routes.recovery);
+                        }}
+                      >
+                        Forgot your Master Password?
+                      </button>
+                    </footer>
+                  </section>
+                </div>
               )}
 
               {isSecurityRoute && (
@@ -3566,100 +3629,146 @@ export default function App() {
               )}
 
               {isRecoveryRoute && (
-                <section className="route-panel">
-                  <hr />
+                <div className="recovery-route">
+                  <header className="recovery-route__topbar">
+                    <button
+                      className="vault-back-button"
+                      type="button"
+                      disabled={loading}
+                      onClick={() => {
+                        navigate(routes.vault);
+                      }}
+                    >
+                      <span aria-hidden="true">←</span>
+                      Back to vault
+                    </button>
+                  </header>
 
-                  <h3>Recover Master Password</h3>
-
-                  <p>
-                    <strong>Vault status:</strong> Locked
-                  </p>
-
-                  <p>
-                    Recovery lets you replace a forgotten Master Password while keeping the existing
-                    account and vault encryption keys.
-                  </p>
-
-                  <p>
-                    Completing recovery will revoke every authenticated session, including this one.
-                    You will need to sign in again with your passkey.
-                  </p>
-
-                  <hr />
-
-                  <h4>Recovery Kit</h4>
-
-                  {!recoveryKitLoaded ? (
-                    <>
-                      <p>
-                        Load your Recovery Kit locally. The file is processed only inside this
-                        browser and is not uploaded to the server.
-                      </p>
-
-                      <label>
-                        Recovery Kit
-                        <input
-                          ref={recoveryKitFileRef}
-                          type="file"
-                          accept=".json,application/json"
-                          onChange={(event) => {
-                            void handleRecoveryKitFile(event.target.files?.[0]);
-                          }}
-                        />
-                      </label>
-                    </>
-                  ) : (
-                    <>
-                      <p>Recovery Kit loaded for this recovery session.</p>
-
-                      <button type="button" disabled={loading} onClick={discardRecoveryFlowState}>
-                        Discard Recovery Kit
-                      </button>
-
-                      <hr />
-
-                      <h4>New Master Password</h4>
-
-                      <div>
-                        <input
-                          ref={recoveryNewMasterPasswordRef}
-                          type="password"
-                          placeholder="New Master Password"
-                          autoComplete="new-password"
-                        />
+                  <section className="recovery-card">
+                    <header className="recovery-card__header">
+                      <div className="recovery-card__icon" aria-hidden="true">
+                        !
                       </div>
 
                       <div>
-                        <input
-                          ref={recoveryConfirmMasterPasswordRef}
-                          type="password"
-                          placeholder="Confirm new Master Password"
-                          autoComplete="new-password"
-                        />
+                        <span className="recovery-card__eyebrow">Account recovery</span>
+                        <h2>Recover Master Password</h2>
+                        <p>
+                          Replace a forgotten Master Password while preserving your existing Rory
+                          account and vault encryption keys.
+                        </p>
                       </div>
+                    </header>
 
-                      <button
-                        type="button"
-                        disabled={loading}
-                        onClick={handleRecoverMasterPassword}
-                      >
-                        {loading ? 'Recovering…' : 'Recover Master Password'}
-                      </button>
-                    </>
-                  )}
+                    <div className="recovery-critical-warning">
+                      <span className="recovery-critical-warning__icon" aria-hidden="true">
+                        !
+                      </span>
 
-                  <hr />
+                      <div>
+                        <strong>This is a security-sensitive action</strong>
+                        <p>
+                          Completing recovery signs out every authenticated session, including this
+                          one. You will need to sign in again with your passkey.
+                        </p>
+                      </div>
+                    </div>
 
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      navigate(routes.vault);
-                    }}
-                  >
-                    Cancel recovery
-                  </button>
-                </section>
+                    {!recoveryKitLoaded ? (
+                      <div className="recovery-step">
+                        <div className="recovery-step__header">
+                          <span className="recovery-step__number">1</span>
+
+                          <div>
+                            <strong>Load your Recovery Kit</strong>
+                            <p>
+                              The file is processed only inside this browser and is not uploaded to
+                              Rory.
+                            </p>
+                          </div>
+                        </div>
+
+                        <label>
+                          Recovery Kit
+                          <input
+                            ref={recoveryKitFileRef}
+                            type="file"
+                            accept=".json,application/json"
+                            onChange={(event) => {
+                              void handleRecoveryKitFile(event.target.files?.[0]);
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="recovery-kit-loaded">
+                          <span className="recovery-kit-loaded__check">✓</span>
+
+                          <div>
+                            <strong>Recovery Kit loaded</strong>
+                            <span>Available only for this recovery session.</span>
+                          </div>
+
+                          <button
+                            className="vault-text-action"
+                            type="button"
+                            disabled={loading}
+                            onClick={discardRecoveryFlowState}
+                          >
+                            Discard
+                          </button>
+                        </div>
+
+                        <div className="recovery-step">
+                          <div className="recovery-step__header">
+                            <span className="recovery-step__number">2</span>
+
+                            <div>
+                              <strong>Create a new Master Password</strong>
+                              <p>Use at least 12 characters and choose something unique to Rory.</p>
+                            </div>
+                          </div>
+
+                          <div className="recovery-password-fields">
+                            <label>
+                              New Master Password
+                              <input
+                                ref={recoveryNewMasterPasswordRef}
+                                type="password"
+                                placeholder="At least 12 characters"
+                                autoComplete="new-password"
+                              />
+                            </label>
+
+                            <label>
+                              Confirm new Master Password
+                              <input
+                                ref={recoveryConfirmMasterPasswordRef}
+                                type="password"
+                                placeholder="Enter it again"
+                                autoComplete="new-password"
+                              />
+                            </label>
+                          </div>
+
+                          <button
+                            className="button-danger button-full"
+                            type="button"
+                            disabled={loading}
+                            onClick={handleRecoverMasterPassword}
+                          >
+                            {loading ? 'Recovering…' : 'Recover Master Password'}
+                          </button>
+
+                          <p className="recovery-action-hint">
+                            Rory will ask you to confirm before replacing your Master Password.
+                          </p>
+                        </div>
+                      </>
+                    )}
+                  </section>
+                </div>
               )}
             </div>
           )}
@@ -4411,19 +4520,17 @@ export default function App() {
         </AppShell>
       )}
 
-      {!webAuthnSupported && <p role="alert">This browser does not support WebAuthn.</p>}
-
-      {message && (
-        <p className="app-message" role="status">
-          {message}
-        </p>
-      )}
-
-      {error && (
-        <p className="app-alert" role="alert">
-          {error}
-        </p>
-      )}
+      <AppNotifications
+        message={message}
+        error={error}
+        webAuthnSupported={webAuthnSupported}
+        onDismissMessage={() => {
+          setMessage('');
+        }}
+        onDismissError={() => {
+          setError('');
+        }}
+      />
     </main>
   );
 }
