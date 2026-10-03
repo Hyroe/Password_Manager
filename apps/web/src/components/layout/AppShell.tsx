@@ -101,8 +101,27 @@ export function AppShell({
             {unlocked ? 'Vault unlocked' : 'Vault locked'}
           </div>
 
-          <div className="workspace-user" title={email}>
-            {email}
+          <div className="workspace-topbar__account">
+            <div className="workspace-user" title={email}>
+              {email}
+            </div>
+
+            <div className="workspace-mobile-actions" role="group" aria-label="Account actions">
+              {unlocked && onLockVault && (
+                <button
+                  className="workspace-mobile-action"
+                  type="button"
+                  aria-label="Lock vault"
+                  onClick={onLockVault}
+                >
+                  Lock
+                </button>
+              )}
+
+              <button className="workspace-mobile-action" type="button" onClick={onSignOut}>
+                Sign out
+              </button>
+            </div>
           </div>
         </header>
 

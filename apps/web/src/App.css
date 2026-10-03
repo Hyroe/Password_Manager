@@ -476,6 +476,23 @@ meter {
   background: var(--color-success);
 }
 
+.workspace-topbar__account {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.workspace-mobile-actions {
+  display: none;
+}
+
+.workspace-mobile-action {
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+  background: transparent;
+}
+
 .workspace-user {
   max-width: 320px;
   overflow: hidden;
@@ -483,6 +500,7 @@ meter {
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .workspace-content {
@@ -501,29 +519,48 @@ meter {
 @media (max-width: 760px) {
   .workspace {
     display: block;
+    min-height: 100dvh;
   }
 
   .workspace-sidebar {
     position: static;
     width: 100%;
     height: auto;
-    padding: 12px;
+    padding: 10px 12px 8px;
     border-right: 0;
     border-bottom: 1px solid var(--color-border);
   }
 
   .workspace-brand {
+    min-height: 44px;
+    padding: 0 4px 8px;
     border-bottom: 0;
-    padding-bottom: 8px;
+  }
+
+  .workspace-brand .app-brand__mark {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    font-size: 13px;
+  }
+
+  .workspace-brand strong {
+    font-size: 15px;
   }
 
   .workspace-nav {
-    display: flex;
-    padding-top: 4px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding-top: 2px;
   }
 
   .workspace-nav__item {
-    width: auto;
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+    padding: 8px 10px;
+    text-align: center;
   }
 
   .workspace-sidebar__footer {
@@ -531,18 +568,45 @@ meter {
   }
 
   .workspace-topbar {
-    position: static;
-    min-height: 54px;
-    padding: 0 16px;
+    position: sticky;
+    z-index: 20;
+    top: 0;
+    min-height: 56px;
+    gap: 12px;
+    padding: 9px 12px;
+    background: rgba(11, 15, 20, 0.96);
+  }
+
+  .workspace-topbar__status {
+    flex: 0 0 auto;
+  }
+
+  .workspace-topbar__account {
+    flex: 1;
+    justify-content: flex-end;
+    gap: 8px;
   }
 
   .workspace-user {
-    max-width: 50%;
+    max-width: min(34vw, 200px);
+    font-size: 11px;
+  }
+
+  .workspace-mobile-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+
+  .workspace-mobile-action {
+    min-height: 36px;
+    padding: 6px 9px;
+    font-size: 11px;
   }
 
   .workspace-content {
     width: min(100% - 24px, 1040px);
-    padding: 20px 0 48px;
+    padding: 18px 0 44px;
   }
 }
 
@@ -1301,6 +1365,49 @@ meter {
 
 @media (max-width: 620px) {
   .vault-view__header {
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .vault-view__header > button {
+    width: 100%;
+  }
+
+  .vault-toolbar {
+    gap: 8px;
+  }
+
+  .vault-layout {
+    gap: 14px;
+  }
+
+  .vault-library,
+  .vault-create-panel {
+    border-radius: var(--radius-md);
+  }
+
+  .vault-create-panel {
+    padding: 16px;
+  }
+
+  .vault-item-row__content {
+    min-height: 68px;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .vault-item-row__icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .vault-item-row__delete {
+    min-height: 36px;
+    margin-right: 8px;
+    padding: 6px 8px;
+  }
+  .vault-view__header {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1327,6 +1434,50 @@ meter {
 
   .vault-item-row__chevron {
     display: none;
+  }
+
+  .vault-view__header {
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .vault-view__header > button {
+    width: 100%;
+  }
+
+  .vault-toolbar {
+    gap: 8px;
+  }
+
+  .vault-layout {
+    gap: 14px;
+  }
+
+  .vault-library,
+  .vault-create-panel {
+    border-radius: var(--radius-md);
+  }
+
+  .vault-create-panel {
+    padding: 16px;
+  }
+
+  .vault-item-row__content {
+    min-height: 68px;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .vault-item-row__icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .vault-item-row__delete {
+    min-height: 36px;
+    margin-right: 8px;
+    padding: 6px 8px;
   }
 }
 
@@ -1618,6 +1769,60 @@ meter {
 }
 
 @media (max-width: 620px) {
+  .vault-detail-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .vault-detail-toolbar > button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .vault-detail__header {
+    gap: 12px;
+    padding: 18px;
+  }
+
+  .vault-detail__identity {
+    gap: 10px;
+  }
+
+  .vault-detail__icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .vault-detail__identity h2 {
+    font-size: 18px;
+  }
+
+  .vault-detail-field {
+    padding: 16px 18px;
+  }
+
+  .vault-secret-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .vault-detail__footer {
+    padding: 16px 18px;
+  }
+
+  .vault-edit__header {
+    padding: 18px 18px 0;
+  }
+
+  .vault-edit__form {
+    padding: 18px;
+  }
+
+  .vault-edit__actions {
+    padding: 14px 18px 18px;
+  }
   .vault-detail__header {
     align-items: flex-start;
   }
@@ -2029,6 +2234,55 @@ meter {
 }
 
 @media (max-width: 620px) {
+  .security-view__header {
+    margin-bottom: 16px;
+  }
+
+  .security-status-card {
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .security-panel__header {
+    padding: 16px;
+  }
+
+  .security-panel__bulk-action {
+    padding: 12px 16px;
+  }
+
+  .security-session {
+    padding: 12px 16px;
+  }
+
+  .security-session__content > span {
+    overflow: visible;
+    text-overflow: initial;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .security-session > button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .security-info-callout {
+    margin: 16px 16px 0;
+  }
+
+  .security-master-password {
+    padding: 16px;
+  }
+
+  .security-recovery-warning {
+    margin: 16px;
+  }
+
+  .security-panel > .button-full {
+    width: calc(100% - 32px);
+    margin: 0 16px 16px;
+  }
   .security-status-card {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -2575,7 +2829,10 @@ meter {
   max-width: 430px;
   margin: auto;
   padding: 0;
-  overflow: hidden;
+  max-height: calc(100dvh - 32px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-lg);
   color: var(--color-text);
@@ -2677,4 +2934,93 @@ summary:focus:not(:focus-visible) {
 
 button:disabled:focus-visible {
   outline-color: var(--color-text-muted);
+}
+
+@media (max-width: 520px) {
+  .workspace-topbar {
+    flex-wrap: wrap;
+  }
+
+  .workspace-topbar__status {
+    flex: 1 1 auto;
+    min-height: 32px;
+  }
+
+  .workspace-topbar__account {
+    width: 100%;
+    flex: 1 0 100%;
+    justify-content: space-between;
+  }
+
+  .workspace-user {
+    max-width: 48%;
+  }
+
+  .workspace-mobile-action {
+    min-height: 40px;
+  }
+}
+@media (max-width: 620px) {
+  .locked-vault-card {
+    gap: 18px;
+    padding: 18px;
+  }
+
+  .locked-vault-card__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .recovery-route__topbar .vault-back-button {
+    width: 100%;
+  }
+
+  .recovery-card {
+    gap: 18px;
+    padding: 18px;
+  }
+
+  .recovery-card__header {
+    align-items: flex-start;
+  }
+
+  .recovery-card__icon {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (max-width: 620px) {
+  input,
+  textarea {
+    font-size: 16px;
+  }
+
+  input[type='file'] {
+    max-width: 100%;
+  }
+}
+
+@media (pointer: coarse) {
+  .workspace-nav__item,
+  .workspace-sidebar__action,
+  .button-primary,
+  .button-secondary,
+  .button-danger,
+  .vault-back-button,
+  .vault-refresh {
+    min-height: 44px;
+  }
+
+  .vault-text-action {
+    min-height: 36px;
+  }
+
+  .app-notification__close {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
 }
