@@ -3273,17 +3273,16 @@ export default function App() {
           }}
         >
           {runtimeState === 'AUTHENTICATED_LOCKED' && authenticatedUser && (
-            <section>
-              <h2>Vault locked</h2>
-
-              <p>
-                Signed in as <strong>{authenticatedUser.email}</strong>
-              </p>
-
-              <p>Your identity is authenticated, but your vault keys are not loaded.</p>
-
+            <div className="workspace-route">
               {isVaultRoute && (
-                <>
+                <section className="route-panel">
+                  <h2>Vault locked</h2>
+
+                  <p>
+                    Signed in as <strong>{authenticatedUser.email}</strong>
+                  </p>
+
+                  <p>Your identity is authenticated, but your vault keys are not loaded.</p>
                   <label>
                     Recovery Kit
                     <input
@@ -3332,170 +3331,242 @@ export default function App() {
                   >
                     Recover Master Password
                   </button>
-                </>
+                </section>
               )}
 
               {isSecurityRoute && (
-                <>
-                  <hr />
+                <section className="security-view">
+                  <header className="security-view__header">
+                    <div>
+                      <h2>Security</h2>
+                      <p>Protect access to your Rory account and encrypted vault.</p>
+                    </div>
+                  </header>
 
-                  <h3>Security settings</h3>
+                  <div className="security-status-card">
+                    <div className="security-status-card__icon security-status-card__icon--locked">
+                      <span aria-hidden="true">◇</span>
+                    </div>
 
-                  <p>
-                    <strong>Vault status:</strong> Locked
-                  </p>
+                    <div className="security-status-card__content">
+                      <span className="security-eyebrow">Vault security</span>
+                      <strong>Vault locked</strong>
+                      <p>
+                        Your identity is authenticated, but vault encryption keys are not loaded in
+                        this browser.
+                      </p>
+                    </div>
 
-                  <p>
-                    Your account is authenticated, but vault keys are not loaded in this browser
-                    session.
-                  </p>
+                    <span className="security-badge">Locked</span>
+                  </div>
 
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      navigate(routes.vault);
-                    }}
-                  >
-                    Back to vault
-                  </button>
+                  <div className="security-grid">
+                    <section className="security-panel">
+                      <header className="security-panel__header">
+                        <div>
+                          <h3>Sessions</h3>
+                          <p>Review devices currently authenticated to your Rory account.</p>
+                        </div>
 
-                  <hr />
+                        <button
+                          className="button-secondary"
+                          type="button"
+                          disabled={loading || securitySessionsLoading}
+                          onClick={handleLoadSessions}
+                        >
+                          {securitySessionsLoading ? 'Refreshing…' : 'Refresh'}
+                        </button>
+                      </header>
 
-                  <h4>Sessions</h4>
+                      {managedSessions.length > 1 && (
+                        <div className="security-panel__bulk-action">
+                          <span>Don't recognize another session?</span>
 
-                  <p>Review and revoke authenticated sessions for your account.</p>
-
-                  <button
-                    type="button"
-                    disabled={loading || securitySessionsLoading}
-                    onClick={handleLoadSessions}
-                  >
-                    {securitySessionsLoading ? 'Loading sessions…' : 'Refresh sessions'}
-                  </button>
-
-                  {managedSessions.length > 1 && (
-                    <button
-                      type="button"
-                      disabled={loading || securitySessionsLoading}
-                      onClick={handleRevokeOtherSessions}
-                    >
-                      Sign out other sessions
-                    </button>
-                  )}
-
-                  {managedSessions.length > 0 && (
-                    <ul>
-                      {managedSessions.map((session) => (
-                        <li key={session.id}>
-                          <strong>{session.deviceLabel}</strong>
-                          {session.current && ' — Current session'}
-                          <br />
-                          Last active: {new Date(session.lastSeenAt).toLocaleString()}
-                          <br />
-                          Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
-                          <br />
                           <button
+                            className="button-secondary"
                             type="button"
                             disabled={loading || securitySessionsLoading}
-                            onClick={() => {
-                              void handleRevokeManagedSession(session.id, session.current);
-                            }}
+                            onClick={handleRevokeOtherSessions}
                           >
-                            {session.current ? 'Sign out this session' : 'Sign out'}
+                            Sign out other sessions
                           </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                        </div>
+                      )}
 
-                  <hr />
+                      {securitySessionsLoading && managedSessions.length === 0 ? (
+                        <div className="security-panel__empty">Loading authenticated sessions…</div>
+                      ) : managedSessions.length === 0 ? (
+                        <div className="security-panel__empty">
+                          No sessions are currently available.
+                        </div>
+                      ) : (
+                        <div className="security-session-list">
+                          {managedSessions.map((session) => (
+                            <article className="security-session" key={session.id}>
+                              <div className="security-session__icon" aria-hidden="true">
+                                ◇
+                              </div>
 
-                  <h4>Master Password</h4>
+                              <div className="security-session__content">
+                                <div className="security-session__title">
+                                  <strong>{session.deviceLabel}</strong>
 
-                  <p>
-                    Changing your Master Password re-wraps the account root key. Existing vault
-                    items are not re-encrypted.
-                  </p>
+                                  {session.current && (
+                                    <span className="security-current-badge">Current</span>
+                                  )}
+                                </div>
 
-                  <p>Load your Recovery Kit locally to continue.</p>
+                                <span>
+                                  Last active {new Date(session.lastSeenAt).toLocaleString()}
+                                </span>
 
-                  <label>
-                    Recovery Kit
-                    <input
-                      ref={recoveryKitFileRef}
-                      type="file"
-                      accept=".json,application/json"
-                      onChange={(event) => {
-                        void handleRecoveryKitFile(event.target.files?.[0]);
-                      }}
-                    />
-                  </label>
+                                <span>
+                                  Expires {new Date(session.absoluteExpiresAt).toLocaleString()}
+                                </span>
+                              </div>
 
-                  {recoveryKitLoaded && (
-                    <>
-                      <div>
-                        <input
-                          ref={changeCurrentMasterPasswordRef}
-                          type="password"
-                          placeholder="Current Master Password"
-                          autoComplete="current-password"
-                        />
-                      </div>
+                              <button
+                                className={session.current ? 'button-danger' : 'button-secondary'}
+                                type="button"
+                                disabled={loading || securitySessionsLoading}
+                                onClick={() => {
+                                  void handleRevokeManagedSession(session.id, session.current);
+                                }}
+                              >
+                                {session.current ? 'Sign out' : 'Revoke'}
+                              </button>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </section>
 
-                      <div>
-                        <input
-                          ref={changeNewMasterPasswordRef}
-                          type="password"
-                          placeholder="New Master Password"
-                          autoComplete="new-password"
-                        />
-                      </div>
+                    <div className="security-side-column">
+                      <section className="security-panel">
+                        <header className="security-panel__header security-panel__header--stacked">
+                          <div>
+                            <h3>Master Password</h3>
+                            <p>
+                              Change the password used locally to protect your account root key.
+                            </p>
+                          </div>
+                        </header>
 
-                      <div>
-                        <input
-                          ref={changeConfirmMasterPasswordRef}
-                          type="password"
-                          placeholder="Confirm new Master Password"
-                          autoComplete="new-password"
-                        />
-                      </div>
+                        <div className="security-info-callout">
+                          <span className="security-info-callout__icon" aria-hidden="true">
+                            ◇
+                          </span>
 
-                      <button type="button" disabled={loading} onClick={handleChangeMasterPassword}>
-                        Change Master Password
-                      </button>
-                    </>
-                  )}
+                          <div>
+                            <strong>Your vault stays encrypted</strong>
+                            <p>
+                              Changing the Master Password re-wraps the account root key. Existing
+                              vault items are not re-encrypted.
+                            </p>
+                          </div>
+                        </div>
 
-                  <hr />
+                        {!recoveryKitLoaded ? (
+                          <div className="security-master-password">
+                            <p>
+                              Load your Recovery Kit locally before changing your Master Password.
+                            </p>
 
-                  <h4>Account recovery</h4>
+                            <label>
+                              Recovery Kit
+                              <input
+                                ref={recoveryKitFileRef}
+                                type="file"
+                                accept=".json,application/json"
+                                onChange={(event) => {
+                                  void handleRecoveryKitFile(event.target.files?.[0]);
+                                }}
+                              />
+                            </label>
+                          </div>
+                        ) : (
+                          <div className="security-master-password">
+                            <div className="security-kit-ready">
+                              <span className="security-kit-ready__check">✓</span>
 
-                  <p>
-                    If you no longer know your current Master Password, use the recovery flow
-                    instead.
-                  </p>
+                              <div>
+                                <strong>Recovery Kit loaded</strong>
+                                <span>Processed locally in this browser.</span>
+                              </div>
+                            </div>
 
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      navigate(routes.recovery);
-                    }}
-                  >
-                    Recover Master Password
-                  </button>
+                            <label>
+                              Current Master Password
+                              <input
+                                ref={changeCurrentMasterPasswordRef}
+                                type="password"
+                                placeholder="Current Master Password"
+                                autoComplete="current-password"
+                              />
+                            </label>
 
-                  <hr />
+                            <label>
+                              New Master Password
+                              <input
+                                ref={changeNewMasterPasswordRef}
+                                type="password"
+                                placeholder="At least 12 characters"
+                                autoComplete="new-password"
+                              />
+                            </label>
 
-                  <button type="button" disabled={loading} onClick={handleLogout}>
-                    Sign out
-                  </button>
-                </>
+                            <label>
+                              Confirm new Master Password
+                              <input
+                                ref={changeConfirmMasterPasswordRef}
+                                type="password"
+                                placeholder="Enter it again"
+                                autoComplete="new-password"
+                              />
+                            </label>
+
+                            <button
+                              className="button-primary button-full"
+                              type="button"
+                              disabled={loading}
+                              onClick={handleChangeMasterPassword}
+                            >
+                              {loading ? 'Changing…' : 'Change Master Password'}
+                            </button>
+                          </div>
+                        )}
+                      </section>
+
+                      <section className="security-panel">
+                        <header className="security-panel__header security-panel__header--stacked">
+                          <div>
+                            <h3>Account recovery</h3>
+                            <p>Replace a forgotten Master Password using your Recovery Kit.</p>
+                          </div>
+                        </header>
+
+                        <div className="security-recovery-warning">
+                          Recovery signs out every authenticated session, including this one.
+                        </div>
+
+                        <button
+                          className="button-secondary button-full"
+                          type="button"
+                          disabled={loading}
+                          onClick={() => {
+                            navigate(routes.recovery);
+                          }}
+                        >
+                          Recover Master Password
+                        </button>
+                      </section>
+                    </div>
+                  </div>
+                </section>
               )}
 
               {isRecoveryRoute && (
-                <>
+                <section className="route-panel">
                   <hr />
 
                   <h3>Recover Master Password</h3>
@@ -3588,9 +3659,9 @@ export default function App() {
                   >
                     Cancel recovery
                   </button>
-                </>
+                </section>
               )}
-            </section>
+            </div>
           )}
 
           {runtimeState === 'UNLOCKED' && authenticatedUser && (
@@ -4163,101 +4234,178 @@ export default function App() {
               )}
 
               {isSecurityRoute && (
-                <section className="route-panel">
-                  <h3>Security settings</h3>
+                <section className="security-view">
+                  <header className="security-view__header">
+                    <div>
+                      <h2>Security</h2>
+                      <p>Protect access to your Rory account and encrypted vault.</p>
+                    </div>
+                  </header>
 
-                  <p>
-                    <strong>Vault status:</strong> Unlocked
-                  </p>
+                  <div className="security-status-card">
+                    <div className="security-status-card__icon security-status-card__icon--unlocked">
+                      <span aria-hidden="true">◇</span>
+                    </div>
 
-                  <p>
-                    Vault keys are currently available only inside the local WASM runtime for this
-                    browser session.
-                  </p>
+                    <div className="security-status-card__content">
+                      <span className="security-eyebrow">Vault security</span>
+                      <strong>Vault unlocked</strong>
+                      <p>
+                        Vault keys are available only inside the local WASM runtime for this browser
+                        session.
+                      </p>
+                    </div>
 
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      navigate(routes.vault);
-                    }}
-                  >
-                    Back to vault
-                  </button>
+                    <span className="security-badge security-badge--success">Unlocked</span>
+                  </div>
 
-                  <h4>Sessions</h4>
+                  <div className="security-grid">
+                    <section className="security-panel">
+                      <header className="security-panel__header">
+                        <div>
+                          <h3>Sessions</h3>
+                          <p>Review devices currently authenticated to your Rory account.</p>
+                        </div>
 
-                  <p>Review and revoke authenticated sessions for your account.</p>
+                        <button
+                          className="button-secondary"
+                          type="button"
+                          disabled={loading || securitySessionsLoading}
+                          onClick={handleLoadSessions}
+                        >
+                          {securitySessionsLoading ? 'Refreshing…' : 'Refresh'}
+                        </button>
+                      </header>
 
-                  <button
-                    type="button"
-                    disabled={loading || securitySessionsLoading}
-                    onClick={handleLoadSessions}
-                  >
-                    {securitySessionsLoading ? 'Loading sessions…' : 'Refresh sessions'}
-                  </button>
+                      {managedSessions.length > 1 && (
+                        <div className="security-panel__bulk-action">
+                          <span>Don't recognize another session?</span>
 
-                  {managedSessions.length > 1 && (
-                    <button
-                      type="button"
-                      disabled={loading || securitySessionsLoading}
-                      onClick={handleRevokeOtherSessions}
-                    >
-                      Sign out other sessions
-                    </button>
-                  )}
-
-                  {managedSessions.length > 0 && (
-                    <ul>
-                      {managedSessions.map((session) => (
-                        <li key={session.id}>
-                          <strong>{session.deviceLabel}</strong>
-                          {session.current && ' — Current session'}
-                          <br />
-                          Last active: {new Date(session.lastSeenAt).toLocaleString()}
-                          <br />
-                          Expires: {new Date(session.absoluteExpiresAt).toLocaleString()}
-                          <br />
                           <button
+                            className="button-secondary"
                             type="button"
                             disabled={loading || securitySessionsLoading}
-                            onClick={() => {
-                              void handleRevokeManagedSession(session.id, session.current);
-                            }}
+                            onClick={handleRevokeOtherSessions}
                           >
-                            {session.current ? 'Sign out this session' : 'Sign out'}
+                            Sign out other sessions
                           </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                        </div>
+                      )}
 
-                  <hr />
+                      {securitySessionsLoading && managedSessions.length === 0 ? (
+                        <div className="security-panel__empty">Loading authenticated sessions…</div>
+                      ) : managedSessions.length === 0 ? (
+                        <div className="security-panel__empty">
+                          No sessions are currently available.
+                        </div>
+                      ) : (
+                        <div className="security-session-list">
+                          {managedSessions.map((session) => (
+                            <article className="security-session" key={session.id}>
+                              <div className="security-session__icon" aria-hidden="true">
+                                ◇
+                              </div>
 
-                  <h4>Master Password</h4>
+                              <div className="security-session__content">
+                                <div className="security-session__title">
+                                  <strong>{session.deviceLabel}</strong>
 
-                  <p>
-                    Lock the vault before changing your Master Password. This removes unlocked vault
-                    keys from memory before entering the key-management flow.
-                  </p>
+                                  {session.current && (
+                                    <span className="security-current-badge">Current</span>
+                                  )}
+                                </div>
 
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      handleLockVault();
+                                <span>
+                                  Last active {new Date(session.lastSeenAt).toLocaleString()}
+                                </span>
 
-                      navigate(routes.security, {
-                        replace: true,
-                      });
-                    }}
-                  >
-                    Lock vault to change Master Password
-                  </button>
+                                <span>
+                                  Expires {new Date(session.absoluteExpiresAt).toLocaleString()}
+                                </span>
+                              </div>
+
+                              <button
+                                className={session.current ? 'button-danger' : 'button-secondary'}
+                                type="button"
+                                disabled={loading || securitySessionsLoading}
+                                onClick={() => {
+                                  void handleRevokeManagedSession(session.id, session.current);
+                                }}
+                              >
+                                {session.current ? 'Sign out' : 'Revoke'}
+                              </button>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    <div className="security-side-column">
+                      <section className="security-panel">
+                        <header className="security-panel__header security-panel__header--stacked">
+                          <div>
+                            <h3>Master Password</h3>
+                            <p>Manage the password protecting your account root key.</p>
+                          </div>
+                        </header>
+
+                        <div className="security-info-callout">
+                          <span className="security-info-callout__icon" aria-hidden="true">
+                            ◇
+                          </span>
+
+                          <div>
+                            <strong>Lock required</strong>
+                            <p>
+                              Rory removes unlocked vault keys from memory before entering the
+                              Master Password management flow.
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          className="button-secondary button-full"
+                          type="button"
+                          disabled={loading}
+                          onClick={() => {
+                            handleLockVault();
+
+                            navigate(routes.security, {
+                              replace: true,
+                            });
+                          }}
+                        >
+                          Lock vault to change Master Password
+                        </button>
+                      </section>
+
+                      <section className="security-panel">
+                        <header className="security-panel__header security-panel__header--stacked">
+                          <div>
+                            <h3>Vault state</h3>
+                            <p>Cryptographic key material currently available to Rory.</p>
+                          </div>
+                        </header>
+
+                        <div className="security-property">
+                          <span>Encryption keys</span>
+                          <strong>Available locally</strong>
+                        </div>
+
+                        <div className="security-property">
+                          <span>Server access</span>
+                          <strong>No plaintext keys</strong>
+                        </div>
+
+                        <div className="security-property">
+                          <span>Browser state</span>
+                          <strong>Unlocked</strong>
+                        </div>
+                      </section>
+                    </div>
+                  </div>
                 </section>
               )}
-
-              <hr />
             </div>
           )}
         </AppShell>
