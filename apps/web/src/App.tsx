@@ -3897,104 +3897,166 @@ export default function App() {
               )}
 
               {isVaultItemRoute && (
-                <section className="route-panel">
-                  <div className="route-panel__actions">
+                <div className="vault-detail-route">
+                  <header className="vault-detail-toolbar">
                     <button
+                      className="vault-back-button"
+                      type="button"
+                      disabled={loading}
+                      onClick={handleCloseLoginItem}
+                    >
+                      <span aria-hidden="true">←</span>
+                      All items
+                    </button>
+
+                    <button
+                      className="button-secondary"
                       type="button"
                       disabled={loading}
                       onClick={() => {
-                        navigate(routes.vault);
+                        void handleSyncVaultItems();
                       }}
                     >
-                      Back to vault
+                      {loading ? 'Syncing…' : 'Sync'}
                     </button>
-                  </div>
+                  </header>
 
-                  {loading && !selectedLogin && <p>Loading login…</p>}
+                  {loading && !selectedLogin && (
+                    <div className="vault-detail-state">
+                      <span className="vault-inline-status__indicator" />
+                      Loading login…
+                    </div>
+                  )}
 
-                  {!loading && !selectedLogin && <p>Vault item could not be loaded.</p>}
+                  {!loading && !selectedLogin && (
+                    <div className="vault-detail-state vault-detail-state--error">
+                      <h2>Login unavailable</h2>
+                      <p>The vault item could not be loaded.</p>
+
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={handleCloseLoginItem}
+                      >
+                        Return to vault
+                      </button>
+                    </div>
+                  )}
 
                   {selectedLogin && selectedItemId && (
-                    <>
-                      <h3>Decrypted login</h3>
+                    <section className="vault-detail">
+                      <header className="vault-detail__header">
+                        <div className="vault-detail__identity">
+                          <div className="vault-detail__icon" aria-hidden="true">
+                            {selectedLogin.name.trim().charAt(0).toUpperCase() || '?'}
+                          </div>
 
-                      <p>
-                        <strong>Item ID:</strong> <code>{selectedItemId}</code>
-                      </p>
+                          <div>
+                            <span className="vault-detail__type">Login</span>
+                            <h2>{selectedLogin.name}</h2>
+                          </div>
+                        </div>
 
-                      {!editingLogin ? (
-                        <>
-                          <p>
-                            <strong>Name:</strong> {selectedLogin.name}
-                          </p>
-
-                          <p>
-                            <strong>Username:</strong> {selectedLogin.username}
-                          </p>
-
-                          <p>
-                            <strong>Password:</strong>{' '}
-                            {selectedLoginPasswordVisible ? (
-                              <code>{selectedLogin.password}</code>
-                            ) : (
-                              <code>••••••••••••</code>
-                            )}
-                          </p>
-
+                        {!editingLogin && (
                           <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedLoginPasswordVisible((visible) => !visible);
-                            }}
-                          >
-                            {selectedLoginPasswordVisible ? 'Hide password' : 'Show password'}
-                          </button>
-
-                          <p>
-                            <strong>URLs:</strong>
-                          </p>
-
-                          {selectedLogin.urls.length === 0 ? (
-                            <p>None</p>
-                          ) : (
-                            <ul>
-                              {selectedLogin.urls.map((url) => (
-                                <li key={url}>{url}</li>
-                              ))}
-                            </ul>
-                          )}
-
-                          <p>
-                            <strong>Notes:</strong> {selectedLogin.notes}
-                          </p>
-
-                          <button
+                            className="button-secondary"
                             type="button"
                             disabled={loading}
                             onClick={handleStartEditingLogin}
                           >
                             Edit
                           </button>
+                        )}
+                      </header>
 
-                          <button
-                            type="button"
-                            disabled={loading}
-                            onClick={() => {
-                              void handleDeleteLoginItem(selectedItemId);
-                            }}
-                          >
-                            Delete
-                          </button>
+                      {!editingLogin ? (
+                        <>
+                          <div className="vault-detail__fields">
+                            <div className="vault-detail-field">
+                              <span className="vault-detail-field__label">Username</span>
 
-                          <button type="button" onClick={handleCloseLoginItem}>
-                            Close
-                          </button>
+                              <div className="vault-detail-field__value">
+                                {selectedLogin.username || (
+                                  <span className="vault-detail-field__empty">None</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="vault-detail-field">
+                              <span className="vault-detail-field__label">Password</span>
+
+                              <div className="vault-secret-row">
+                                <code className="vault-secret">
+                                  {selectedLoginPasswordVisible
+                                    ? selectedLogin.password
+                                    : '••••••••••••'}
+                                </code>
+
+                                <button
+                                  className="vault-text-action"
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedLoginPasswordVisible((visible) => !visible);
+                                  }}
+                                >
+                                  {selectedLoginPasswordVisible ? 'Hide' : 'Show'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="vault-detail-field">
+                              <span className="vault-detail-field__label">Website</span>
+
+                              {selectedLogin.urls.length === 0 ? (
+                                <span className="vault-detail-field__empty">None</span>
+                              ) : (
+                                <div className="vault-detail__urls">
+                                  {selectedLogin.urls.map((url) => (
+                                    <span key={url}>{url}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="vault-detail-field">
+                              <span className="vault-detail-field__label">Notes</span>
+
+                              {selectedLogin.notes ? (
+                                <p className="vault-detail__notes">{selectedLogin.notes}</p>
+                              ) : (
+                                <span className="vault-detail-field__empty">No notes</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <footer className="vault-detail__footer">
+                            <div className="vault-item-metadata">
+                              <span>Item ID</span>
+                              <code>{selectedItemId}</code>
+                            </div>
+
+                            <button
+                              className="button-danger"
+                              type="button"
+                              disabled={loading}
+                              onClick={() => {
+                                void handleDeleteLoginItem(selectedItemId);
+                              }}
+                            >
+                              Delete login
+                            </button>
+                          </footer>
                         </>
                       ) : (
-                        <>
-                          <h4>Edit login</h4>
+                        <div className="vault-edit">
+                          <header className="vault-edit__header">
+                            <div>
+                              <h3>Edit login</h3>
+                              <p>Changes are encrypted locally before they are stored.</p>
+                            </div>
+                          </header>
 
-                          <div>
+                          <div className="vault-edit__form">
                             <label>
                               Name
                               <input
@@ -4005,9 +4067,7 @@ export default function App() {
                                 onChange={scheduleEditLoginPasswordStrength}
                               />
                             </label>
-                          </div>
 
-                          <div>
                             <label>
                               Username
                               <input
@@ -4018,47 +4078,49 @@ export default function App() {
                                 onChange={scheduleEditLoginPasswordStrength}
                               />
                             </label>
-                          </div>
 
-                          <div>
+                            <div className="vault-password-field">
+                              <label>
+                                Password
+                                <input
+                                  ref={editPasswordRef}
+                                  type={editLoginPasswordVisible ? 'text' : 'password'}
+                                  autoComplete="off"
+                                  defaultValue={selectedLogin.password}
+                                  onChange={scheduleEditLoginPasswordStrength}
+                                />
+                              </label>
+
+                              <div className="vault-password-field__actions">
+                                <button
+                                  className="vault-text-action"
+                                  type="button"
+                                  disabled={loading}
+                                  onClick={handleGenerateEditLoginPassword}
+                                >
+                                  Generate
+                                </button>
+
+                                <button
+                                  className="vault-text-action"
+                                  type="button"
+                                  disabled={loading}
+                                  onClick={() => {
+                                    setEditLoginPasswordVisible((visible) => !visible);
+                                  }}
+                                >
+                                  {editLoginPasswordVisible ? 'Hide' : 'Show'}
+                                </button>
+                              </div>
+                            </div>
+
+                            <PasswordStrengthFeedback
+                              assessment={editLoginPasswordStrength}
+                              loading={editLoginPasswordStrengthLoading}
+                            />
+
                             <label>
-                              Password
-                              <input
-                                ref={editPasswordRef}
-                                type={editLoginPasswordVisible ? 'text' : 'password'}
-                                autoComplete="off"
-                                defaultValue={selectedLogin.password}
-                                onChange={scheduleEditLoginPasswordStrength}
-                              />
-                            </label>
-
-                            <button
-                              type="button"
-                              disabled={loading}
-                              onClick={handleGenerateEditLoginPassword}
-                            >
-                              Generate password
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={loading}
-                              onClick={() => {
-                                setEditLoginPasswordVisible((visible) => !visible);
-                              }}
-                            >
-                              {editLoginPasswordVisible ? 'Hide password' : 'Show password'}
-                            </button>
-                          </div>
-
-                          <PasswordStrengthFeedback
-                            assessment={editLoginPasswordStrength}
-                            loading={editLoginPasswordStrengthLoading}
-                          />
-
-                          <div>
-                            <label>
-                              URL
+                              Website
                               <input
                                 ref={editUrlRef}
                                 type="url"
@@ -4067,31 +4129,37 @@ export default function App() {
                                 onChange={scheduleEditLoginPasswordStrength}
                               />
                             </label>
-                          </div>
 
-                          <div>
                             <label>
                               Notes
                               <textarea ref={editNotesRef} defaultValue={selectedLogin.notes} />
                             </label>
                           </div>
 
-                          <button type="button" disabled={loading} onClick={handleUpdateLoginItem}>
-                            Save changes
-                          </button>
+                          <footer className="vault-edit__actions">
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              disabled={loading}
+                              onClick={handleCancelEditingLogin}
+                            >
+                              Cancel
+                            </button>
 
-                          <button
-                            type="button"
-                            disabled={loading}
-                            onClick={handleCancelEditingLogin}
-                          >
-                            Cancel
-                          </button>
-                        </>
+                            <button
+                              className="button-primary"
+                              type="button"
+                              disabled={loading}
+                              onClick={handleUpdateLoginItem}
+                            >
+                              {loading ? 'Saving…' : 'Save changes'}
+                            </button>
+                          </footer>
+                        </div>
                       )}
-                    </>
+                    </section>
                   )}
-                </section>
+                </div>
               )}
 
               {isSecurityRoute && (
@@ -4116,8 +4184,6 @@ export default function App() {
                   >
                     Back to vault
                   </button>
-
-                  <hr />
 
                   <h4>Sessions</h4>
 
