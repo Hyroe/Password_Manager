@@ -10,6 +10,9 @@ interface ConfirmationDialogProps {
   onConfirm: () => void;
 }
 
+const titleId = 'confirmation-dialog-title';
+const descriptionId = 'confirmation-dialog-description';
+
 export function ConfirmationDialog({
   open,
   title,
@@ -21,6 +24,7 @@ export function ConfirmationDialog({
 }: ConfirmationDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -30,13 +34,25 @@ export function ConfirmationDialog({
     }
 
     if (open && !dialog.open) {
+      previouslyFocusedElementRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
       dialog.showModal();
       cancelButtonRef.current?.focus();
+
       return;
     }
 
     if (!open && dialog.open) {
       dialog.close();
+
+      const previouslyFocusedElement = previouslyFocusedElementRef.current;
+
+      previouslyFocusedElementRef.current = null;
+
+      if (previouslyFocusedElement?.isConnected) {
+        previouslyFocusedElement.focus();
+      }
     }
   }, [open]);
 
@@ -44,6 +60,9 @@ export function ConfirmationDialog({
     <dialog
       ref={dialogRef}
       className="confirmation-dialog"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      aria-busy={busy}
       onCancel={(event) => {
         event.preventDefault();
 
@@ -58,8 +77,9 @@ export function ConfirmationDialog({
         </div>
 
         <div className="confirmation-dialog__content">
-          <h2>{title}</h2>
-          <p>{description}</p>
+          <h2 id={titleId}>{title}</h2>
+
+          <p id={descriptionId}>{description}</p>
         </div>
       </div>
 

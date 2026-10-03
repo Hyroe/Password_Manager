@@ -27,7 +27,7 @@ export function AppShell({
 
   return (
     <div className="workspace">
-      <aside className="workspace-sidebar">
+      <aside className="workspace-sidebar" aria-label="Rory workspace">
         <div className="workspace-brand">
           <div className="app-brand__mark" aria-hidden="true">
             R
@@ -40,6 +40,7 @@ export function AppShell({
           <button
             className={`workspace-nav__item ${vaultActive ? 'workspace-nav__item--active' : ''}`}
             type="button"
+            aria-current={vaultActive ? 'page' : undefined}
             onClick={onNavigateVault}
           >
             <span aria-hidden="true">▣</span>
@@ -49,6 +50,7 @@ export function AppShell({
           <button
             className={`workspace-nav__item ${securityActive ? 'workspace-nav__item--active' : ''}`}
             type="button"
+            aria-current={securityActive ? 'page' : undefined}
             onClick={onNavigateSecurity}
           >
             <span aria-hidden="true">◇</span>
@@ -57,8 +59,11 @@ export function AppShell({
         </nav>
 
         <div className="workspace-sidebar__footer">
-          <div className={`vault-status vault-status--${vaultStatus}`}>
-            <span className="vault-status__indicator" />
+          <div
+            className={`vault-status vault-status--${vaultStatus}`}
+            aria-label={`Vault ${vaultStatus}`}
+          >
+            <span className="vault-status__indicator" aria-hidden="true" />
 
             <div>
               <strong>Vault {vaultStatus}</strong>
@@ -80,11 +85,17 @@ export function AppShell({
 
       <div className="workspace-main">
         <header className="workspace-topbar">
-          <div className="workspace-topbar__status">
+          <div
+            className="workspace-topbar__status"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             <span
               className={`workspace-topbar__dot ${
                 unlocked ? 'workspace-topbar__dot--unlocked' : ''
               }`}
+              aria-hidden="true"
             />
 
             {unlocked ? 'Vault unlocked' : 'Vault locked'}

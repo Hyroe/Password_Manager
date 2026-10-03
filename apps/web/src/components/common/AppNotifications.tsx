@@ -20,7 +20,7 @@ export function AppNotifications({
   return (
     <div className="notification-region" aria-label="Notifications">
       {!webAuthnSupported && (
-        <div className="app-notification app-notification--warning" role="alert">
+        <div className="app-notification app-notification--warning" role="alert" aria-atomic="true">
           <span className="app-notification__icon" aria-hidden="true">
             !
           </span>
@@ -33,7 +33,11 @@ export function AppNotifications({
       )}
 
       {message && (
-        <div className="app-notification app-notification--success" role="status">
+        <div
+          className="app-notification app-notification--success"
+          role="status"
+          aria-atomic="true"
+        >
           <span className="app-notification__icon" aria-hidden="true">
             ✓
           </span>
@@ -46,7 +50,7 @@ export function AppNotifications({
           <button
             className="app-notification__close"
             type="button"
-            aria-label="Dismiss notification"
+            aria-label="Dismiss success notification"
             onClick={onDismissMessage}
           >
             ×
@@ -55,7 +59,7 @@ export function AppNotifications({
       )}
 
       {error && (
-        <div className="app-notification app-notification--error" role="alert">
+        <div className="app-notification app-notification--error" role="alert" aria-atomic="true">
           <span className="app-notification__icon" aria-hidden="true">
             !
           </span>
@@ -68,7 +72,7 @@ export function AppNotifications({
           <button
             className="app-notification__close"
             type="button"
-            aria-label="Dismiss error"
+            aria-label="Dismiss error notification"
             onClick={onDismissError}
           >
             ×
