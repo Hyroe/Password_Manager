@@ -867,3 +867,486 @@ meter {
     display: none;
   }
 }
+
+/* Vault */
+
+.workspace-route {
+  min-width: 0;
+}
+
+.vault-view {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.vault-view__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.vault-view__header > div {
+  display: grid;
+  gap: 5px;
+}
+
+.vault-view__header h2 {
+  font-size: 25px;
+}
+
+.vault-view__header p {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.vault-toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.vault-search {
+  position: relative;
+  flex: 1;
+}
+
+.vault-search input {
+  padding-right: 68px;
+  padding-left: 38px;
+}
+
+.vault-search__icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 13px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.vault-search__clear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-color: transparent;
+  color: var(--color-text-muted);
+  background: transparent;
+  font-size: 11px;
+  transform: translateY(-50%);
+}
+
+.vault-search__clear:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+  transform: translateY(-50%);
+}
+
+.vault-refresh {
+  flex: 0 0 auto;
+}
+
+.vault-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 20px;
+  align-items: start;
+}
+
+.vault-library,
+.vault-create-panel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.vault-library {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.vault-library__summary {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.vault-inline-status,
+.vault-inline-error {
+  margin: 14px 16px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.vault-inline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-subtle);
+}
+
+.vault-inline-status__indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.vault-inline-error {
+  border: 1px solid rgba(235, 106, 106, 0.25);
+  color: #f1adad;
+  background: var(--color-danger-soft);
+}
+
+/* Vault rows */
+
+.vault-item-list {
+  display: grid;
+}
+
+.vault-item-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.vault-item-row:last-child {
+  border-bottom: 0;
+}
+
+.vault-item-row__content {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 72px;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.vault-item-row__content:hover:not(:disabled) {
+  border: 0;
+  background: var(--color-surface-hover);
+}
+
+.vault-item-row__icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 9px;
+  color: var(--color-text);
+  background: var(--color-surface-elevated);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.vault-item-row__details {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.vault-item-row__details strong,
+.vault-item-row__details span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-item-row__details strong {
+  font-size: 13px;
+}
+
+.vault-item-row__details span {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.vault-item-row__details .vault-item-row__url {
+  color: var(--color-text-muted);
+}
+
+.vault-item-row__chevron {
+  padding-right: 4px;
+  color: var(--color-text-muted);
+  font-size: 20px;
+}
+
+.vault-item-row__delete {
+  position: absolute;
+  top: 50%;
+  right: 36px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-color: transparent;
+  color: var(--color-text-muted);
+  background: transparent;
+  font-size: 11px;
+  opacity: 0;
+  transform: translateY(-50%);
+}
+
+.vault-item-row:hover .vault-item-row__delete,
+.vault-item-row:focus-within .vault-item-row__delete {
+  opacity: 1;
+}
+
+.vault-item-row__delete:hover:not(:disabled) {
+  border-color: rgba(235, 106, 106, 0.2);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  transform: translateY(-50%);
+}
+
+/* Empty states */
+
+.vault-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 64px 24px;
+  text-align: center;
+}
+
+.vault-empty--compact {
+  padding: 48px 24px;
+}
+
+.vault-empty__icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  margin-bottom: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 11px;
+  color: var(--color-text-muted);
+  background: var(--color-bg-subtle);
+  font-size: 20px;
+}
+
+.vault-empty h3 {
+  font-size: 15px;
+}
+
+.vault-empty p {
+  max-width: 320px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* New login */
+
+.vault-create-panel {
+  position: sticky;
+  top: 88px;
+  padding: 20px;
+}
+
+.vault-create-panel__header {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+
+.vault-create-panel__header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.vault-create-panel__header p {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.vault-create-panel__icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  font-size: 17px;
+}
+
+.vault-create-panel__form {
+  display: grid;
+  gap: 15px;
+}
+
+.vault-password-field {
+  display: grid;
+  gap: 7px;
+}
+
+.vault-password-field__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.vault-text-action {
+  min-height: 28px;
+  padding: 3px 7px;
+  border-color: transparent;
+  color: var(--color-accent);
+  background: transparent;
+  font-size: 11px;
+}
+
+.vault-text-action:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--color-accent-hover);
+  background: var(--color-accent-soft);
+}
+
+/* Deleted items */
+
+.vault-trash {
+  border-top: 1px solid var(--color-border);
+}
+
+.vault-trash summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+}
+
+.vault-trash summary::-webkit-details-marker {
+  display: none;
+}
+
+.vault-trash summary:hover {
+  background: var(--color-surface-hover);
+}
+
+.vault-trash__content {
+  padding: 0 16px 16px;
+}
+
+.vault-trash__content > p {
+  margin-bottom: 12px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.vault-trash__empty {
+  padding: 16px 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.vault-trash__list {
+  display: grid;
+  gap: 8px;
+}
+
+.vault-trash__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+}
+
+.vault-trash__item > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.vault-trash__item strong {
+  font-size: 12px;
+}
+
+.vault-trash__item span {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+/* Temporary route panels */
+
+.route-panel {
+  margin: 0;
+}
+
+.route-panel__actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 980px) {
+  .vault-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .vault-create-panel {
+    position: static;
+  }
+}
+
+@media (max-width: 620px) {
+  .vault-view__header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .vault-toolbar {
+    flex-direction: column;
+  }
+
+  .vault-refresh {
+    width: 100%;
+  }
+
+  .vault-item-row__delete {
+    position: static;
+    align-self: center;
+    margin-right: 10px;
+    opacity: 1;
+    transform: none;
+  }
+
+  .vault-item-row__delete:hover:not(:disabled) {
+    transform: none;
+  }
+
+  .vault-item-row__chevron {
+    display: none;
+  }
+}

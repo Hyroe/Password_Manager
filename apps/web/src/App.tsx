@@ -20,6 +20,7 @@ import { AppShell } from './components/layout/AppShell';
 import { AuthShell } from './components/layout/AuthShell';
 import { AuthCard } from './components/auth/AuthCard';
 import { RegistrationProgress } from './components/auth/RegistrationProgress';
+import { VaultItemRow } from './components/vault/VaultItemRow';
 
 import {
   browserSupportsWebAuthn,
@@ -3593,278 +3594,321 @@ export default function App() {
           )}
 
           {runtimeState === 'UNLOCKED' && authenticatedUser && (
-            <section>
-              <h2>Vault unlocked</h2>
-
-              <p>
-                Signed in as <strong>{authenticatedUser.email}</strong>
-              </p>
-
-              <p>Vault keys are available only inside the local WASM runtime.</p>
-
+            <div className="workspace-route">
               {isVaultRoute && (
-                <>
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      navigate(routes.security);
-                    }}
-                  >
-                    Security settings
-                  </button>
+                <section className="vault-view">
+                  <header className="vault-view__header">
+                    <div>
+                      <h2>All items</h2>
 
-                  <hr />
-
-                  <h3>New login</h3>
-
-                  <div>
-                    <label>
-                      Name
-                      <input
-                        ref={loginNameRef}
-                        type="text"
-                        autoComplete="off"
-                        placeholder="GitHub"
-                        onChange={scheduleNewLoginPasswordStrength}
-                      />
-                    </label>
-                  </div>
-
-                  <div>
-                    <label>
-                      Username
-                      <input
-                        ref={loginUsernameRef}
-                        type="text"
-                        autoComplete="off"
-                        placeholder="you@example.com"
-                        onChange={scheduleNewLoginPasswordStrength}
-                      />
-                    </label>
-                  </div>
-
-                  <div>
-                    <label>
-                      Password
-                      <input
-                        ref={loginPasswordRef}
-                        type={newLoginPasswordVisible ? 'text' : 'password'}
-                        autoComplete="off"
-                        placeholder="Password"
-                        onChange={scheduleNewLoginPasswordStrength}
-                      />
-                    </label>
+                      <p>
+                        {vaultListView.totalCount}{' '}
+                        {vaultListView.totalCount === 1 ? 'login' : 'logins'} in your private vault.
+                      </p>
+                    </div>
 
                     <button
+                      className="button-secondary"
                       type="button"
-                      disabled={loading}
-                      onClick={handleGenerateNewLoginPassword}
-                    >
-                      Generate password
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={loading}
+                      disabled={loading || vaultSearchIndexing}
                       onClick={() => {
-                        setNewLoginPasswordVisible((visible) => !visible);
+                        void handleSyncVaultItems();
                       }}
                     >
-                      {newLoginPasswordVisible ? 'Hide password' : 'Show password'}
+                      {loading ? 'Syncing…' : 'Sync'}
                     </button>
-                  </div>
+                  </header>
 
-                  <PasswordStrengthFeedback
-                    assessment={newLoginPasswordStrength}
-                    loading={newLoginPasswordStrengthLoading}
-                  />
+                  <div className="vault-toolbar">
+                    <div className="vault-search">
+                      <span className="vault-search__icon" aria-hidden="true">
+                        ⌕
+                      </span>
 
-                  <div>
-                    <label>
-                      URL
-                      <input
-                        ref={loginUrlRef}
-                        type="url"
-                        autoComplete="off"
-                        placeholder="https://example.com"
-                        onChange={scheduleNewLoginPasswordStrength}
-                      />
-                    </label>
-                  </div>
-
-                  <div>
-                    <label>
-                      Notes
-                      <textarea ref={loginNotesRef} placeholder="Optional notes" />
-                    </label>
-                  </div>
-
-                  <button type="button" disabled={loading} onClick={handleCreateLoginItem}>
-                    Save login
-                  </button>
-
-                  <hr />
-
-                  <h3>Vault items ({vaultListView.totalCount})</h3>
-
-                  <div>
-                    <label>
-                      Search
                       <input
                         type="search"
                         value={vaultSearchQuery}
+                        aria-label="Search vault"
                         placeholder="Search name, username, or URL"
                         autoComplete="off"
                         onChange={(event) => {
                           setVaultSearchQuery(event.target.value);
                         }}
                       />
-                    </label>
 
-                    {vaultListView.hasQuery && (
-                      <button
-                        type="button"
-                        disabled={loading}
-                        onClick={() => {
-                          setVaultSearchQuery('');
-                        }}
-                      >
-                        Clear search
-                      </button>
-                    )}
+                      {vaultListView.hasQuery && (
+                        <button
+                          className="vault-search__clear"
+                          type="button"
+                          disabled={loading}
+                          onClick={() => {
+                            setVaultSearchQuery('');
+                          }}
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+
+                    <button
+                      className="vault-refresh"
+                      type="button"
+                      disabled={loading || vaultSearchIndexing}
+                      onClick={() => {
+                        void refreshVaultItems();
+                      }}
+                    >
+                      {vaultSearchIndexing ? 'Indexing…' : 'Refresh'}
+                    </button>
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={loading || vaultSearchIndexing}
-                    onClick={() => {
-                      void refreshVaultItems();
-                    }}
-                  >
-                    Refresh
-                  </button>
-
-                  {vaultSearchIndexing && <p>Building local search index…</p>}
-
-                  {vaultSearchIndexError && <p role="alert">{vaultSearchIndexError}</p>}
-
-                  {vaultItems.length === 0 ? (
-                    <p>No saved logins yet.</p>
-                  ) : vaultSearchIndexing &&
-                    vaultSearchEntries.length === 0 ? null : vaultSearchEntries.length === 0 ? (
-                    <p>No vault items could be indexed locally.</p>
-                  ) : (
-                    <>
-                      {vaultListView.hasQuery ? (
-                        <p>
-                          Showing {vaultListView.visibleCount} of {vaultListView.totalCount}{' '}
-                          {vaultListView.totalCount === 1 ? 'login' : 'logins'}.
-                        </p>
-                      ) : (
-                        <p>
-                          {vaultListView.totalCount}{' '}
-                          {vaultListView.totalCount === 1 ? 'login' : 'logins'}.
-                        </p>
+                  <div className="vault-layout">
+                    <div className="vault-library">
+                      {vaultSearchIndexing && (
+                        <div className="vault-inline-status">
+                          <span className="vault-inline-status__indicator" />
+                          Building local search index…
+                        </div>
                       )}
 
-                      {vaultListView.emptyState === 'NO_SEARCH_RESULTS' ? (
-                        <p>No logins match your search.</p>
-                      ) : (
-                        <ul>
-                          {vaultListView.entries.map((entry) => (
-                            <li key={entry.itemId}>
-                              <div>
-                                <strong>{entry.name}</strong>
-                              </div>
-
-                              {entry.username && <div>{entry.username}</div>}
-
-                              {entry.urls[0] && <div>{entry.urls[0]}</div>}
-
-                              <div>
-                                <button
-                                  type="button"
-                                  disabled={loading || vaultSearchIndexing}
-                                  onClick={() => {
-                                    handleViewLoginItem(entry.itemId);
-                                  }}
-                                >
-                                  View
-                                </button>{' '}
-                                <button
-                                  type="button"
-                                  disabled={loading || vaultSearchIndexing}
-                                  onClick={() => {
-                                    void handleDeleteLoginItem(entry.itemId);
-                                  }}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
+                      {vaultSearchIndexError && (
+                        <div className="vault-inline-error" role="alert">
+                          {vaultSearchIndexError}
+                        </div>
                       )}
-                    </>
-                  )}
 
-                  <h3>Deleted items ({deletedVaultItems.length})</h3>
-
-                  <p>
-                    Deleted items are retained temporarily so their deletion state can synchronize
-                    across clients.
-                  </p>
-
-                  {deletedVaultItems.length === 0 ? (
-                    <p>No deleted items.</p>
-                  ) : (
-                    <ul>
-                      {deletedVaultItems.map((item) => (
-                        <li key={item.id}>
-                          <div>
-                            <strong>Deleted login</strong>
+                      {vaultItems.length === 0 ? (
+                        <div className="vault-empty">
+                          <div className="vault-empty__icon" aria-hidden="true">
+                            +
                           </div>
 
-                          <div>
-                            Item ID: <code>{item.id}</code>
+                          <h3>Your vault is empty</h3>
+
+                          <p>Create your first login using the form beside your vault.</p>
+                        </div>
+                      ) : vaultSearchIndexing &&
+                        vaultSearchEntries.length === 0 ? null : vaultSearchEntries.length === 0 ? (
+                        <div className="vault-empty">
+                          <h3>Items unavailable</h3>
+
+                          <p>No vault items could be indexed locally.</p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="vault-library__summary">
+                            {vaultListView.hasQuery ? (
+                              <span>
+                                Showing {vaultListView.visibleCount} of {vaultListView.totalCount}
+                              </span>
+                            ) : (
+                              <span>
+                                {vaultListView.totalCount}{' '}
+                                {vaultListView.totalCount === 1 ? 'login' : 'logins'}
+                              </span>
+                            )}
                           </div>
 
-                          <div>Revision: {item.revisionNumber}</div>
+                          {vaultListView.emptyState === 'NO_SEARCH_RESULTS' ? (
+                            <div className="vault-empty vault-empty--compact">
+                              <h3>No matching logins</h3>
 
-                          {item.deletedAt && (
-                            <div>Deleted: {new Date(item.deletedAt).toLocaleString()}</div>
+                              <p>Try another name, username, or website.</p>
+
+                              <button
+                                className="button-secondary"
+                                type="button"
+                                onClick={() => {
+                                  setVaultSearchQuery('');
+                                }}
+                              >
+                                Clear search
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="vault-item-list">
+                              {vaultListView.entries.map((entry) => (
+                                <VaultItemRow
+                                  key={entry.itemId}
+                                  entry={entry}
+                                  disabled={loading || vaultSearchIndexing}
+                                  onOpen={handleViewLoginItem}
+                                  onDelete={(itemId) => {
+                                    void handleDeleteLoginItem(itemId);
+                                  }}
+                                />
+                              ))}
+                            </div>
                           )}
+                        </>
+                      )}
 
-                          <button
-                            type="button"
-                            disabled={loading}
-                            onClick={() => {
-                              void handleRestoreLoginItem(item.id);
-                            }}
-                          >
-                            Restore
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
+                      <details className="vault-trash">
+                        <summary>
+                          <span>Deleted items</span>
+                          <span>{deletedVaultItems.length}</span>
+                        </summary>
+
+                        <div className="vault-trash__content">
+                          <p>
+                            Deleted items are retained temporarily so their deletion state can
+                            synchronize across clients.
+                          </p>
+
+                          {deletedVaultItems.length === 0 ? (
+                            <div className="vault-trash__empty">No deleted items.</div>
+                          ) : (
+                            <div className="vault-trash__list">
+                              {deletedVaultItems.map((item) => (
+                                <article className="vault-trash__item" key={item.id}>
+                                  <div>
+                                    <strong>Deleted login</strong>
+
+                                    {item.deletedAt && (
+                                      <span>
+                                        Deleted {new Date(item.deletedAt).toLocaleString()}
+                                      </span>
+                                    )}
+
+                                    <span>Revision {item.revisionNumber}</span>
+                                  </div>
+
+                                  <button
+                                    className="button-secondary"
+                                    type="button"
+                                    disabled={loading}
+                                    onClick={() => {
+                                      void handleRestoreLoginItem(item.id);
+                                    }}
+                                  >
+                                    Restore
+                                  </button>
+                                </article>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    </div>
+
+                    <aside className="vault-create-panel">
+                      <header className="vault-create-panel__header">
+                        <div className="vault-create-panel__icon" aria-hidden="true">
+                          +
+                        </div>
+
+                        <div>
+                          <h3>New login</h3>
+                          <p>Encrypted locally before it is stored.</p>
+                        </div>
+                      </header>
+
+                      <div className="vault-create-panel__form">
+                        <label>
+                          Name
+                          <input
+                            ref={loginNameRef}
+                            type="text"
+                            autoComplete="off"
+                            placeholder="GitHub"
+                            onChange={scheduleNewLoginPasswordStrength}
+                          />
+                        </label>
+
+                        <label>
+                          Username
+                          <input
+                            ref={loginUsernameRef}
+                            type="text"
+                            autoComplete="off"
+                            placeholder="you@example.com"
+                            onChange={scheduleNewLoginPasswordStrength}
+                          />
+                        </label>
+
+                        <div className="vault-password-field">
+                          <label>
+                            Password
+                            <input
+                              ref={loginPasswordRef}
+                              type={newLoginPasswordVisible ? 'text' : 'password'}
+                              autoComplete="off"
+                              placeholder="Password"
+                              onChange={scheduleNewLoginPasswordStrength}
+                            />
+                          </label>
+
+                          <div className="vault-password-field__actions">
+                            <button
+                              className="vault-text-action"
+                              type="button"
+                              disabled={loading}
+                              onClick={handleGenerateNewLoginPassword}
+                            >
+                              Generate
+                            </button>
+
+                            <button
+                              className="vault-text-action"
+                              type="button"
+                              disabled={loading}
+                              onClick={() => {
+                                setNewLoginPasswordVisible((visible) => !visible);
+                              }}
+                            >
+                              {newLoginPasswordVisible ? 'Hide' : 'Show'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <PasswordStrengthFeedback
+                          assessment={newLoginPasswordStrength}
+                          loading={newLoginPasswordStrengthLoading}
+                        />
+
+                        <label>
+                          Website
+                          <input
+                            ref={loginUrlRef}
+                            type="url"
+                            autoComplete="off"
+                            placeholder="https://example.com"
+                            onChange={scheduleNewLoginPasswordStrength}
+                          />
+                        </label>
+
+                        <label>
+                          Notes
+                          <textarea ref={loginNotesRef} placeholder="Optional notes" />
+                        </label>
+
+                        <button
+                          className="button-primary button-full"
+                          type="button"
+                          disabled={loading}
+                          onClick={handleCreateLoginItem}
+                        >
+                          {loading ? 'Saving…' : 'Save login'}
+                        </button>
+                      </div>
+                    </aside>
+                  </div>
+                </section>
               )}
 
               {isVaultItemRoute && (
-                <>
-                  <hr />
-
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      navigate(routes.vault);
-                    }}
-                  >
-                    Back to vault
-                  </button>
+                <section className="route-panel">
+                  <div className="route-panel__actions">
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => {
+                        navigate(routes.vault);
+                      }}
+                    >
+                      Back to vault
+                    </button>
+                  </div>
 
                   {loading && !selectedLogin && <p>Loading login…</p>}
 
@@ -4047,13 +4091,11 @@ export default function App() {
                       )}
                     </>
                   )}
-                </>
+                </section>
               )}
 
               {isSecurityRoute && (
-                <>
-                  <hr />
-
+                <section className="route-panel">
                   <h3>Security settings</h3>
 
                   <p>
@@ -4146,35 +4188,11 @@ export default function App() {
                   >
                     Lock vault to change Master Password
                   </button>
-                </>
-              )}
-
-              {(isVaultRoute || isVaultItemRoute) && (
-                <>
-                  <hr />
-
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      void handleSyncVaultItems();
-                    }}
-                  >
-                    Sync changes
-                  </button>
-                </>
+                </section>
               )}
 
               <hr />
-
-              <button type="button" onClick={handleLockVault}>
-                Lock vault
-              </button>
-
-              <button type="button" disabled={loading} onClick={handleLogout}>
-                Sign out
-              </button>
-            </section>
+            </div>
           )}
         </AppShell>
       )}
