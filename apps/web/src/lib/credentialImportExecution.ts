@@ -15,11 +15,20 @@ export interface CredentialImportExecutionResult {
   aborted: boolean;
   abortedAtRow: number | null;
 }
+export interface CredentialImportExecutionProgress {
+  completedCount: number;
+  totalCount: number;
+
+  importedCount: number;
+  failedCount: number;
+}
 
 interface ExecuteCredentialImportOptions {
   shouldContinue?: () => boolean;
 
   onFailure?: (error: unknown, rowNumber: number) => CredentialImportFailureAction;
+
+  onProgress?: (progress: CredentialImportExecutionProgress) => void;
 }
 
 export async function executeVaultCredentialImport(
@@ -54,6 +63,14 @@ export async function executeVaultCredentialImport(
       await createLoginVaultItem(vault, vaultId, row.draft);
 
       importedRows.push(row.rowNumber);
+
+      options.onProgress?.({
+        completedCount: importedRows.length + failedRows.length,
+        totalCount: rows.length,
+
+        importedCount: importedRows.length,
+        failedCount: failedRows.length,
+      });
     } catch (error) {
       const action = options.onFailure?.(error, row.rowNumber) ?? 'CONTINUE';
 
@@ -70,6 +87,14 @@ export async function executeVaultCredentialImport(
       }
 
       failedRows.push(row.rowNumber);
+
+      options.onProgress?.({
+        completedCount: importedRows.length + failedRows.length,
+        totalCount: rows.length,
+
+        importedCount: importedRows.length,
+        failedCount: failedRows.length,
+      });
     }
   }
 

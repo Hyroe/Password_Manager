@@ -5,8 +5,10 @@ interface AppShellProps {
   email: string;
   vaultStatus: 'locked' | 'unlocked';
   vaultActive: boolean;
+  importActive: boolean;
   securityActive: boolean;
   onNavigateVault: () => void;
+  onNavigateImport: () => void;
   onNavigateSecurity: () => void;
   onLockVault?: () => void;
   onSignOut: () => void;
@@ -17,8 +19,10 @@ export function AppShell({
   email,
   vaultStatus,
   vaultActive,
+  importActive,
   securityActive,
   onNavigateVault,
+  onNavigateImport,
   onNavigateSecurity,
   onLockVault,
   onSignOut,
@@ -36,7 +40,10 @@ export function AppShell({
           <strong>Rory</strong>
         </div>
 
-        <nav className="workspace-nav" aria-label="Main navigation">
+        <nav
+          className={`workspace-nav ${unlocked ? 'workspace-nav--unlocked' : ''}`}
+          aria-label="Main navigation"
+        >
           <button
             className={`workspace-nav__item ${vaultActive ? 'workspace-nav__item--active' : ''}`}
             type="button"
@@ -46,6 +53,18 @@ export function AppShell({
             <span aria-hidden="true">▣</span>
             Vault
           </button>
+
+          {unlocked && (
+            <button
+              className={`workspace-nav__item ${importActive ? 'workspace-nav__item--active' : ''}`}
+              type="button"
+              aria-current={importActive ? 'page' : undefined}
+              onClick={onNavigateImport}
+            >
+              <span aria-hidden="true">⇩</span>
+              Import passwords
+            </button>
+          )}
 
           <button
             className={`workspace-nav__item ${securityActive ? 'workspace-nav__item--active' : ''}`}

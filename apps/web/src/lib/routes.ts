@@ -7,6 +7,8 @@ export const routes = {
 
   vault: '/vault',
 
+  vaultImport: '/vault/import',
+
   vaultItemPattern: '/vault/items/:itemId',
 
   vaultItem: (itemId: string) => `/vault/items/${encodeURIComponent(itemId)}`,

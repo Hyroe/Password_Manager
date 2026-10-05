@@ -555,6 +555,10 @@ meter {
     padding-top: 2px;
   }
 
+  .workspace-nav--unlocked {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .workspace-nav__item {
     width: 100%;
     min-height: 44px;
@@ -3022,5 +3026,287 @@ button:disabled:focus-visible {
     min-width: 36px;
     height: 36px;
     min-height: 36px;
+  }
+}
+
+.vault-import-route {
+  width: 100%;
+}
+
+.vault-import {
+  display: grid;
+  width: min(100%, 760px);
+  margin: 0 auto;
+  gap: 18px;
+}
+
+.vault-import__header {
+  display: grid;
+  gap: 6px;
+}
+
+.vault-import__header h2,
+.vault-import__header p {
+  margin: 0;
+}
+
+.vault-import__eyebrow {
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vault-import__header p {
+  color: var(--color-text-secondary);
+}
+
+.vault-import__security {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.vault-import__security-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.vault-import__security div {
+  display: grid;
+  gap: 4px;
+}
+
+.vault-import__security p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.vault-import__file {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.vault-import__file label {
+  display: grid;
+  gap: 8px;
+}
+
+.vault-import__file p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.vault-import__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 80px;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.vault-import__summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vault-import__summary > div {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.vault-import__summary span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.vault-import__summary strong {
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-import__preview {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.vault-import__preview > header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.vault-import__preview h3,
+.vault-import__preview p {
+  margin: 0;
+}
+
+.vault-import__preview p {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.vault-import__preview-list {
+  display: grid;
+}
+
+.vault-import__preview-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 0.8fr);
+  gap: 16px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.vault-import__preview-row:last-child {
+  border-bottom: 0;
+}
+
+.vault-import__preview-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.vault-import__preview-row strong,
+.vault-import__preview-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-import__preview-row span,
+.vault-import__preview-url {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.vault-import__preview-more {
+  margin: 0;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.vault-import__warning {
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.vault-import__progress {
+  display: grid;
+  gap: 8px;
+}
+
+.vault-import__progress progress {
+  width: 100%;
+  height: 8px;
+}
+
+.vault-import__progress span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.vault-import__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.vault-import__complete {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.vault-import__complete-mark {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.vault-import__complete h3 {
+  margin: 0;
+}
+
+.vault-import__complete .vault-import__summary {
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 620px) {
+  .vault-import {
+    gap: 14px;
+  }
+
+  .vault-import__summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vault-import__preview-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .vault-import__actions {
+    flex-direction: column-reverse;
+  }
+
+  .vault-import__actions > button {
+    width: 100%;
+  }
+
+  .vault-import__complete .vault-import__summary {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .workspace-nav__item {
+    gap: 6px;
+    font-size: 12px;
   }
 }

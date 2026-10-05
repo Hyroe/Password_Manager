@@ -24,6 +24,14 @@ import { VaultItemRow } from './components/vault/VaultItemRow';
 import { AppNotifications } from './components/common/AppNotifications';
 import { ConfirmationDialog } from './components/common/ConfirmationDialog';
 
+import { CredentialImportError, type CredentialImportResult } from './lib/credentialImport';
+
+import { credentialImportAdapters } from './lib/credentialImportAdapters';
+
+import { readCredentialImportFile } from './lib/credentialImportFile';
+
+import { executeVaultCredentialImport } from './lib/credentialImportExecution';
+
 import {
   browserSupportsWebAuthn,
   startRegistration,
@@ -151,7 +159,51 @@ type PendingConfirmation =
     }
   | {
       kind: 'RECOVER_MASTER_PASSWORD';
+    }
+  | {
+      kind: 'IMPORT_CREDENTIALS';
     };
+
+type CredentialImportViewStatus = 'IDLE' | 'READING' | 'READY' | 'IMPORTING' | 'COMPLETE';
+
+interface CredentialImportViewState {
+  status: CredentialImportViewStatus;
+
+  adapterLabel: string;
+
+  totalRows: number;
+  acceptedCount: number;
+  rejectedCount: number;
+
+  completedCount: number;
+  importedCount: number;
+  failedCount: number;
+
+  previewRows: CredentialImportPreviewRow[];
+}
+
+interface CredentialImportPreviewRow {
+  rowNumber: number;
+  name: string;
+  username: string;
+  url: string;
+}
+
+const EMPTY_CREDENTIAL_IMPORT_VIEW: CredentialImportViewState = {
+  status: 'IDLE',
+
+  adapterLabel: '',
+
+  totalRows: 0,
+  acceptedCount: 0,
+  rejectedCount: 0,
+
+  completedCount: 0,
+  importedCount: 0,
+  failedCount: 0,
+
+  previewRows: [],
+};
 
 function PasswordStrengthFeedback({ assessment, loading }: PasswordStrengthFeedbackProps) {
   if (loading) {
@@ -339,6 +391,14 @@ export default function App() {
 
   const credentialImportGenerationRef = useRef(0);
 
+  const credentialImportFileRef = useRef<HTMLInputElement>(null);
+
+  const credentialImportSessionRef = useRef<CredentialImportResult | null>(null);
+
+  const [credentialImportView, setCredentialImportView] = useState<CredentialImportViewState>(
+    EMPTY_CREDENTIAL_IMPORT_VIEW,
+  );
+
   const credentialImportPromiseRef = useRef<Promise<unknown> | null>(null);
 
   const location = useLocation();
@@ -350,6 +410,8 @@ export default function App() {
   const isRegisterRoute = location.pathname === routes.register;
 
   const isVaultRoute = location.pathname === routes.vault;
+
+  const isVaultImportRoute = location.pathname === routes.vaultImport;
 
   const isSecurityRoute = location.pathname === routes.security;
 
@@ -676,6 +738,17 @@ export default function App() {
     vaultSyncInFlightRef.current = false;
 
     vaultSearchGenerationRef.current += 1;
+    credentialImportGenerationRef.current += 1;
+
+    credentialImportSessionRef.current = null;
+
+    if (credentialImportFileRef.current) {
+      credentialImportFileRef.current.value = '';
+    }
+
+    setCredentialImportView(EMPTY_CREDENTIAL_IMPORT_VIEW);
+
+    setPendingConfirmation((current) => (current?.kind === 'IMPORT_CREDENTIALS' ? null : current));
 
     setVaultSearchEntries([]);
     setVaultSearchQuery('');
@@ -753,7 +826,6 @@ export default function App() {
     unlockedVaultIdRef.current = null;
 
     vaultSearchGenerationRef.current += 1;
-    credentialImportGenerationRef.current += 1;
 
     const searchBuild = vaultSearchBuildPromiseRef.current;
 
@@ -946,6 +1018,291 @@ export default function App() {
       setLoading(false);
     }
   }
+
+  async function handleCredentialImportFile(file: File | undefined) {
+    resetMessages();
+
+    if (!file) {
+      discardCredentialImportSession();
+      return;
+    }
+
+    const vault = unlockedVaultRef.current;
+    const vaultId = unlockedVaultIdRef.current;
+
+    if (runtimeState !== 'UNLOCKED' || !vault || !vaultId) {
+      setError('Vault is locked.');
+      return;
+    }
+
+    const generation = credentialImportGenerationRef.current + 1;
+
+    credentialImportGenerationRef.current = generation;
+
+    credentialImportSessionRef.current = null;
+
+    setCredentialImportView({
+      ...EMPTY_CREDENTIAL_IMPORT_VIEW,
+      status: 'READING',
+    });
+
+    try {
+      const result = await readCredentialImportFile(file, credentialImportAdapters);
+
+      if (
+        credentialImportGenerationRef.current !== generation ||
+        unlockedVaultRef.current !== vault ||
+        unlockedVaultIdRef.current !== vaultId
+      ) {
+        return;
+      }
+
+      credentialImportSessionRef.current = result;
+
+      setCredentialImportView({
+        status: 'READY',
+
+        adapterLabel: result.adapterLabel,
+
+        totalRows: result.totalRows,
+
+        acceptedCount: result.accepted.length,
+        rejectedCount: result.rejected.length,
+
+        completedCount: 0,
+        importedCount: 0,
+        failedCount: 0,
+        previewRows: result.accepted.slice(0, 20).map((row) => ({
+          rowNumber: row.rowNumber,
+          name: row.draft.name,
+          username: row.draft.username,
+          url: row.draft.urls[0] ?? '',
+        })),
+      });
+
+      if (result.accepted.length === 0) {
+        setError('No importable credentials were found in this CSV.');
+      }
+    } catch (error) {
+      if (credentialImportGenerationRef.current !== generation) {
+        return;
+      }
+
+      credentialImportSessionRef.current = null;
+
+      setCredentialImportView(EMPTY_CREDENTIAL_IMPORT_VIEW);
+
+      setError(
+        error instanceof CredentialImportError
+          ? error.message
+          : 'The credential CSV could not be processed.',
+      );
+    } finally {
+      /*
+       * Drop the browser File reference. Parsed credentials,
+       * when valid, remain only in credentialImportSessionRef.
+       */
+      if (credentialImportFileRef.current) {
+        credentialImportFileRef.current.value = '';
+      }
+    }
+  }
+
+  function handleStartCredentialImport() {
+    const session = credentialImportSessionRef.current;
+
+    if (!session || session.accepted.length === 0) {
+      setError('There are no credentials ready to import.');
+
+      return;
+    }
+
+    resetMessages();
+
+    setPendingConfirmation({
+      kind: 'IMPORT_CREDENTIALS',
+    });
+  }
+
+  async function confirmCredentialImport() {
+    const vault = unlockedVaultRef.current;
+    const vaultId = unlockedVaultIdRef.current;
+
+    const session = credentialImportSessionRef.current;
+
+    setPendingConfirmation(null);
+    resetMessages();
+
+    if (!vault || !vaultId || !session) {
+      setError('The import session is no longer available.');
+
+      return;
+    }
+
+    const generation = credentialImportGenerationRef.current;
+
+    let terminalError: unknown = null;
+
+    setCredentialImportView((current) => ({
+      ...current,
+
+      status: 'IMPORTING',
+
+      completedCount: 0,
+      importedCount: 0,
+      failedCount: 0,
+
+      previewRows: [],
+    }));
+
+    setLoading(true);
+
+    const executionPromise = executeVaultCredentialImport(vault, vaultId, session.accepted, {
+      shouldContinue() {
+        return (
+          credentialImportGenerationRef.current === generation &&
+          unlockedVaultRef.current === vault &&
+          unlockedVaultIdRef.current === vaultId
+        );
+      },
+
+      onFailure(error) {
+        if (error instanceof ApiError && error.status === 401) {
+          terminalError = error;
+
+          return 'ABORT';
+        }
+
+        return 'CONTINUE';
+      },
+
+      onProgress(progress) {
+        if (credentialImportGenerationRef.current !== generation) {
+          return;
+        }
+
+        setCredentialImportView((current) => ({
+          ...current,
+
+          completedCount: progress.completedCount,
+
+          importedCount: progress.importedCount,
+
+          failedCount: progress.failedCount,
+        }));
+      },
+    });
+
+    credentialImportPromiseRef.current = executionPromise;
+
+    try {
+      const result = await executionPromise;
+
+      if (terminalError instanceof ApiError && terminalError.status === 401) {
+        credentialImportSessionRef.current = null;
+
+        disposeUnlockedVault();
+        clearVaultUiState();
+
+        setAuthenticatedUser(null);
+        setRuntimeState('SIGNED_OUT');
+
+        setError('Your session has expired. Authenticate again.');
+
+        return;
+      }
+
+      if (
+        credentialImportGenerationRef.current !== generation ||
+        unlockedVaultRef.current !== vault ||
+        unlockedVaultIdRef.current !== vaultId
+      ) {
+        return;
+      }
+
+      /*
+       * Import execution no longer needs any source plaintext.
+       * Drop the parsed drafts before refreshing the vault.
+       */
+      credentialImportSessionRef.current = null;
+
+      if (credentialImportFileRef.current) {
+        credentialImportFileRef.current.value = '';
+      }
+
+      await refreshVaultItems();
+
+      /*
+       * Lock/sign-out/navigation could have happened while
+       * the refreshed vault state was being loaded.
+       */
+      if (
+        credentialImportGenerationRef.current !== generation ||
+        unlockedVaultRef.current !== vault ||
+        unlockedVaultIdRef.current !== vaultId
+      ) {
+        return;
+      }
+
+      setCredentialImportView((current) => ({
+        ...current,
+
+        status: 'COMPLETE',
+
+        completedCount: result.importedRows.length + result.failedRows.length,
+
+        importedCount: result.importedRows.length,
+
+        failedCount: result.failedRows.length,
+      }));
+
+      if (result.failedRows.length === 0) {
+        setMessage(
+          `${result.importedRows.length} login${
+            result.importedRows.length === 1 ? '' : 's'
+          } imported successfully.`,
+        );
+      } else {
+        setMessage(
+          `${result.importedRows.length} imported, ${result.failedRows.length} could not be imported.`,
+        );
+      }
+    } finally {
+      if (credentialImportPromiseRef.current === executionPromise) {
+        credentialImportPromiseRef.current = null;
+      }
+
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (isVaultImportRoute && runtimeState === 'UNLOCKED') {
+      return;
+    }
+
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) {
+        return;
+      }
+
+      credentialImportGenerationRef.current += 1;
+
+      credentialImportSessionRef.current = null;
+
+      if (credentialImportFileRef.current) {
+        credentialImportFileRef.current.value = '';
+      }
+
+      setCredentialImportView(EMPTY_CREDENTIAL_IMPORT_VIEW);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isVaultImportRoute, runtimeState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1488,48 +1845,6 @@ export default function App() {
     }
   }
 
-  async function handleSyncVaultItems() {
-    resetMessages();
-
-    setLoading(true);
-
-    try {
-      await syncVaultItemsNow(true);
-    } catch (error) {
-      const vaultId = unlockedVaultIdRef.current;
-
-      if (error instanceof ApiError && error.status === 401) {
-        disposeUnlockedVault();
-
-        clearVaultUiState();
-
-        setAuthenticatedUser(null);
-
-        setRuntimeState('SIGNED_OUT');
-
-        setError('Your session has expired. Authenticate again.');
-
-        return;
-      }
-
-      if (vaultId) {
-        try {
-          await bootstrapVaultSync(vaultId);
-
-          setError('Vault sync state was rebuilt from the server.');
-
-          return;
-        } catch {
-          // Fall through to original error.
-        }
-      }
-
-      setError(error instanceof Error ? error.message : 'Vault synchronization failed.');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function handleUnlockVault() {
     const user = authenticatedUser;
 
@@ -1899,6 +2214,10 @@ export default function App() {
     setMessage('Vault locked.');
 
     setError('');
+
+    navigate(routes.vault, {
+      replace: true,
+    });
   }
 
   async function handleCreateLoginItem() {
@@ -2836,6 +3155,20 @@ export default function App() {
     }
   }
 
+  function discardCredentialImportSession() {
+    credentialImportGenerationRef.current += 1;
+
+    credentialImportSessionRef.current = null;
+
+    if (credentialImportFileRef.current) {
+      credentialImportFileRef.current.value = '';
+    }
+
+    setCredentialImportView(EMPTY_CREDENTIAL_IMPORT_VIEW);
+
+    setPendingConfirmation((current) => (current?.kind === 'IMPORT_CREDENTIALS' ? null : current));
+  }
+
   async function handleLoadSessions() {
     resetMessages();
 
@@ -2959,6 +3292,42 @@ export default function App() {
             : registrationId
               ? 2
               : 1;
+
+  const confirmationDialogContent = useMemo(() => {
+    switch (pendingConfirmation?.kind) {
+      case 'RECOVER_MASTER_PASSWORD':
+        return {
+          title: 'Recover your Master Password?',
+          description:
+            'This will replace your current Master Password and sign out every authenticated session.',
+          confirmLabel: 'Recover Master Password',
+        };
+
+      case 'DELETE_LOGIN':
+        return {
+          title: 'Delete this login?',
+          description:
+            'The login will be removed from the active vault. Its encrypted deletion history will remain available for recovery and synchronization.',
+          confirmLabel: 'Delete login',
+        };
+
+      case 'IMPORT_CREDENTIALS':
+        return {
+          title: 'Import these logins?',
+          description: `Rory will encrypt ${credentialImportView.acceptedCount} login${
+            credentialImportView.acceptedCount === 1 ? '' : 's'
+          } locally before storing them.`,
+          confirmLabel: 'Import logins',
+        };
+
+      default:
+        return {
+          title: '',
+          description: '',
+          confirmLabel: '',
+        };
+    }
+  }, [pendingConfirmation, credentialImportView.acceptedCount]);
 
   return (
     <main className={`app-root ${authenticated ? 'app-root--workspace' : ''}`}>
@@ -3289,9 +3658,13 @@ export default function App() {
           email={authenticatedUser.email}
           vaultStatus={runtimeState === 'UNLOCKED' ? 'unlocked' : 'locked'}
           vaultActive={vaultNavigationActive}
+          importActive={isVaultImportRoute}
           securityActive={isSecurityRoute}
           onNavigateVault={() => {
             navigate(routes.vault);
+          }}
+          onNavigateImport={() => {
+            navigate(routes.vaultImport);
           }}
           onNavigateSecurity={() => {
             navigate(routes.security);
@@ -3814,17 +4187,6 @@ export default function App() {
                         {vaultListView.totalCount === 1 ? 'login' : 'logins'} in your private vault.
                       </p>
                     </div>
-
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      disabled={loading || vaultSearchIndexing}
-                      onClick={() => {
-                        void handleSyncVaultItems();
-                      }}
-                    >
-                      {loading ? 'Syncing…' : 'Sync'}
-                    </button>
                   </header>
 
                   <div className="vault-toolbar">
@@ -4104,6 +4466,233 @@ export default function App() {
                 </section>
               )}
 
+              {isVaultImportRoute && (
+                <div className="vault-import-route">
+                  <header className="vault-detail-toolbar">
+                    <button
+                      className="vault-back-button"
+                      type="button"
+                      disabled={credentialImportView.status === 'IMPORTING'}
+                      onClick={() => {
+                        discardCredentialImportSession();
+                        navigate(routes.vault);
+                      }}
+                    >
+                      <span aria-hidden="true">←</span>
+                      Back to vault
+                    </button>
+                  </header>
+
+                  <section className="vault-import">
+                    <header className="vault-import__header">
+                      <span className="vault-import__eyebrow">Local import</span>
+
+                      <h2>Import passwords</h2>
+
+                      <p>Import credentials exported from a Chromium-compatible browser.</p>
+                    </header>
+
+                    <div className="vault-import__security">
+                      <span className="vault-import__security-icon" aria-hidden="true">
+                        ◇
+                      </span>
+
+                      <div>
+                        <strong>Your CSV stays in this browser</strong>
+
+                        <p>
+                          Rory reads the file locally. Passwords are encrypted before any vault item
+                          is sent to the server.
+                        </p>
+                      </div>
+                    </div>
+
+                    {credentialImportView.status === 'IDLE' && (
+                      <div className="vault-import__file">
+                        <label>
+                          Browser password CSV
+                          <input
+                            ref={credentialImportFileRef}
+                            type="file"
+                            accept=".csv,text/csv"
+                            onChange={(event) => {
+                              void handleCredentialImportFile(event.target.files?.[0]);
+                            }}
+                          />
+                        </label>
+
+                        <p>Currently supported: Chrome and Chromium-compatible CSV exports.</p>
+                      </div>
+                    )}
+
+                    {credentialImportView.status === 'READING' && (
+                      <div className="vault-import__status" role="status" aria-live="polite">
+                        <span className="vault-inline-status__indicator" />
+                        Reading and validating CSV locally…
+                      </div>
+                    )}
+
+                    {(credentialImportView.status === 'READY' ||
+                      credentialImportView.status === 'IMPORTING') && (
+                      <>
+                        <div className="vault-import__summary">
+                          <div>
+                            <span>Detected format</span>
+                            <strong>{credentialImportView.adapterLabel}</strong>
+                          </div>
+
+                          <div>
+                            <span>Total rows</span>
+                            <strong>{credentialImportView.totalRows}</strong>
+                          </div>
+
+                          <div>
+                            <span>Ready</span>
+                            <strong>{credentialImportView.acceptedCount}</strong>
+                          </div>
+
+                          <div>
+                            <span>Rejected</span>
+                            <strong>{credentialImportView.rejectedCount}</strong>
+                          </div>
+                        </div>
+
+                        {credentialImportView.status === 'READY' &&
+                          credentialImportView.previewRows.length > 0 && (
+                            <div className="vault-import__preview">
+                              <header>
+                                <div>
+                                  <h3>Preview</h3>
+
+                                  <p>Passwords are intentionally hidden.</p>
+                                </div>
+                              </header>
+
+                              <div className="vault-import__preview-list">
+                                {credentialImportView.previewRows.map((row) => (
+                                  <article
+                                    className="vault-import__preview-row"
+                                    key={row.rowNumber}
+                                  >
+                                    <div>
+                                      <strong>{row.name}</strong>
+
+                                      <span>{row.username || 'No username'}</span>
+                                    </div>
+
+                                    <span className="vault-import__preview-url">
+                                      {row.url || 'No website'}
+                                    </span>
+                                  </article>
+                                ))}
+                              </div>
+
+                              {credentialImportView.acceptedCount > 20 && (
+                                <p className="vault-import__preview-more">
+                                  Showing 20 of {credentialImportView.acceptedCount} importable
+                                  logins.
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                        {credentialImportView.rejectedCount > 0 && (
+                          <div className="vault-inline-error" role="alert">
+                            {credentialImportView.rejectedCount} row
+                            {credentialImportView.rejectedCount === 1 ? '' : 's'} could not be
+                            parsed and will be skipped.
+                          </div>
+                        )}
+
+                        {credentialImportView.status === 'IMPORTING' && (
+                          <div className="vault-import__progress" role="status" aria-live="polite">
+                            <progress
+                              max={credentialImportView.acceptedCount}
+                              value={credentialImportView.completedCount}
+                            />
+
+                            <span>
+                              {credentialImportView.completedCount} of{' '}
+                              {credentialImportView.acceptedCount} processed
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="vault-import__warning">
+                          Rory will not overwrite existing logins automatically. Importing the same
+                          file more than once can create duplicates.
+                        </div>
+
+                        <footer className="vault-import__actions">
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            disabled={credentialImportView.status === 'IMPORTING'}
+                            onClick={discardCredentialImportSession}
+                          >
+                            Choose another file
+                          </button>
+
+                          <button
+                            className="button-primary"
+                            type="button"
+                            disabled={
+                              credentialImportView.status === 'IMPORTING' ||
+                              credentialImportView.acceptedCount === 0
+                            }
+                            onClick={handleStartCredentialImport}
+                          >
+                            {credentialImportView.status === 'IMPORTING'
+                              ? 'Importing…'
+                              : `Import ${credentialImportView.acceptedCount} login${
+                                  credentialImportView.acceptedCount === 1 ? '' : 's'
+                                }`}
+                          </button>
+                        </footer>
+                      </>
+                    )}
+
+                    {credentialImportView.status === 'COMPLETE' && (
+                      <div className="vault-import__complete">
+                        <div className="vault-import__complete-mark" aria-hidden="true">
+                          ✓
+                        </div>
+
+                        <h3>Import complete</h3>
+
+                        <div className="vault-import__summary">
+                          <div>
+                            <span>Imported</span>
+                            <strong>{credentialImportView.importedCount}</strong>
+                          </div>
+
+                          <div>
+                            <span>Failed</span>
+                            <strong>{credentialImportView.failedCount}</strong>
+                          </div>
+
+                          <div>
+                            <span>CSV rejected</span>
+                            <strong>{credentialImportView.rejectedCount}</strong>
+                          </div>
+                        </div>
+
+                        <button
+                          className="button-primary"
+                          type="button"
+                          onClick={() => {
+                            discardCredentialImportSession();
+                            navigate(routes.vault);
+                          }}
+                        >
+                          Return to vault
+                        </button>
+                      </div>
+                    )}
+                  </section>
+                </div>
+              )}
+
               {isVaultItemRoute && (
                 <div className="vault-detail-route">
                   <header className="vault-detail-toolbar">
@@ -4115,17 +4704,6 @@ export default function App() {
                     >
                       <span aria-hidden="true">←</span>
                       All items
-                    </button>
-
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      disabled={loading}
-                      onClick={() => {
-                        void handleSyncVaultItems();
-                      }}
-                    >
-                      {loading ? 'Syncing…' : 'Sync'}
                     </button>
                   </header>
 
@@ -4550,21 +5128,9 @@ export default function App() {
 
       <ConfirmationDialog
         open={pendingConfirmation !== null}
-        title={
-          pendingConfirmation?.kind === 'RECOVER_MASTER_PASSWORD'
-            ? 'Recover your Master Password?'
-            : 'Delete this login?'
-        }
-        description={
-          pendingConfirmation?.kind === 'RECOVER_MASTER_PASSWORD'
-            ? 'This will replace your current Master Password and sign out every authenticated session.'
-            : 'The login will be removed from the active vault. Its encrypted deletion history will remain available for recovery and synchronization.'
-        }
-        confirmLabel={
-          pendingConfirmation?.kind === 'RECOVER_MASTER_PASSWORD'
-            ? 'Recover Master Password'
-            : 'Delete login'
-        }
+        title={confirmationDialogContent.title}
+        description={confirmationDialogContent.description}
+        confirmLabel={confirmationDialogContent.confirmLabel}
         busy={loading}
         onCancel={() => {
           setPendingConfirmation(null);
@@ -4576,6 +5142,13 @@ export default function App() {
 
           if (pendingConfirmation.kind === 'DELETE_LOGIN') {
             void confirmDeleteLoginItem(pendingConfirmation.itemId);
+
+            return;
+          }
+
+          if (pendingConfirmation.kind === 'IMPORT_CREDENTIALS') {
+            void confirmCredentialImport();
+
             return;
           }
 

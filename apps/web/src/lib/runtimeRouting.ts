@@ -14,7 +14,11 @@ function isLockedPath(pathname: string): boolean {
 }
 
 function isUnlockedPath(pathname: string): boolean {
-  if (pathname === routes.vault || pathname === routes.security) {
+  if (
+    pathname === routes.vault ||
+    pathname === routes.vaultImport ||
+    pathname === routes.security
+  ) {
     return true;
   }
 

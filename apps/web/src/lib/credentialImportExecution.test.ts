@@ -167,4 +167,29 @@ describe('executeVaultCredentialImport', () => {
 
     expect(maximumInFlight).toBe(1);
   });
+  it('reports progress without exposing credential contents', async () => {
+    mockedCreateLoginVaultItem.mockResolvedValue({} as never);
+
+    const progress = vi.fn();
+
+    await executeVaultCredentialImport(vault, 'vault-1', createRows(), {
+      onProgress: progress,
+    });
+
+    expect(progress).toHaveBeenNthCalledWith(1, {
+      completedCount: 1,
+      totalCount: 3,
+      importedCount: 1,
+      failedCount: 0,
+    });
+
+    expect(progress).toHaveBeenLastCalledWith({
+      completedCount: 3,
+      totalCount: 3,
+      importedCount: 3,
+      failedCount: 0,
+    });
+
+    expect(JSON.stringify(progress.mock.calls)).not.toContain('password-one');
+  });
 });
