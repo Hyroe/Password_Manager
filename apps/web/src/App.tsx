@@ -23,6 +23,7 @@ import { RegistrationProgress } from './components/auth/RegistrationProgress';
 import { VaultItemRow } from './components/vault/VaultItemRow';
 import { AppNotifications } from './components/common/AppNotifications';
 import { ConfirmationDialog } from './components/common/ConfirmationDialog';
+import { AsyncStatePanel } from './components/common/AsyncStatePanel';
 
 import { CredentialImportError, type CredentialImportResult } from './lib/credentialImport';
 
@@ -3334,23 +3335,31 @@ export default function App() {
       {!authenticated && (
         <AuthShell>
           {runtimeState === 'CHECKING_SESSION' && (
-            <section>
-              <h2>Checking session</h2>
-
-              <p>Restoring your authenticated session…</p>
-            </section>
+            <AsyncStatePanel
+              variant="loading"
+              title="Checking your session"
+              description="Restoring your secure Rory session…"
+            />
           )}
 
           {runtimeState === 'SESSION_UNAVAILABLE' && (
-            <section>
-              <h2>Session unavailable</h2>
-
-              <p>The application could not verify your session.</p>
-
-              <button type="button" disabled={loading} onClick={retrySessionRestore}>
-                Retry
-              </button>
-            </section>
+            <AsyncStatePanel
+              variant="error"
+              title="Session unavailable"
+              description="Rory could not verify your session. Try again."
+              action={
+                <button
+                  className="button-primary"
+                  type="button"
+                  disabled={loading}
+                  onClick={() => {
+                    void retrySessionRestore();
+                  }}
+                >
+                  {loading ? 'Retrying…' : 'Retry'}
+                </button>
+              }
+            />
           )}
 
           {runtimeState === 'SIGNED_OUT' && (
@@ -4708,25 +4717,28 @@ export default function App() {
                   </header>
 
                   {loading && !selectedLogin && (
-                    <div className="vault-detail-state">
-                      <span className="vault-inline-status__indicator" />
-                      Loading login…
-                    </div>
+                    <AsyncStatePanel
+                      variant="loading"
+                      title="Loading login"
+                      description="Decrypting this item locally…"
+                    />
                   )}
 
                   {!loading && !selectedLogin && (
-                    <div className="vault-detail-state vault-detail-state--error">
-                      <h2>Login unavailable</h2>
-                      <p>The vault item could not be loaded.</p>
-
-                      <button
-                        className="button-secondary"
-                        type="button"
-                        onClick={handleCloseLoginItem}
-                      >
-                        Return to vault
-                      </button>
-                    </div>
+                    <AsyncStatePanel
+                      variant="error"
+                      title="Login unavailable"
+                      description="This vault item could not be loaded."
+                      action={
+                        <button
+                          className="button-secondary"
+                          type="button"
+                          onClick={handleCloseLoginItem}
+                        >
+                          Return to vault
+                        </button>
+                      }
+                    />
                   )}
 
                   {selectedLogin && selectedItemId && (
@@ -5008,11 +5020,19 @@ export default function App() {
                       )}
 
                       {securitySessionsLoading && managedSessions.length === 0 ? (
-                        <div className="security-panel__empty">Loading authenticated sessions…</div>
+                        <AsyncStatePanel
+                          variant="loading"
+                          compact
+                          title="Loading sessions"
+                          description="Retrieving authenticated devices…"
+                        />
                       ) : managedSessions.length === 0 ? (
-                        <div className="security-panel__empty">
-                          No sessions are currently available.
-                        </div>
+                        <AsyncStatePanel
+                          variant="empty"
+                          compact
+                          title="No active sessions"
+                          description="No authenticated sessions are currently available."
+                        />
                       ) : (
                         <div className="security-session-list">
                           {managedSessions.map((session) => (
