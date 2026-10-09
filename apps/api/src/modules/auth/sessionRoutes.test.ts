@@ -35,7 +35,9 @@ describe('authenticated sessions', () => {
     await prisma.$disconnect();
   });
 
-  async function createAuthenticatedSession() {
+  type TestSessionClientKind = 'WEB' | 'BROWSER_EXTENSION';
+
+  async function createAuthenticatedSession(clientKind: TestSessionClientKind = 'WEB') {
     const user = await prisma.user.create({
       data: {
         email: 'session@example.com',
@@ -63,6 +65,8 @@ describe('authenticated sessions', () => {
         idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
 
         absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+
+        clientKind: clientKind,
       },
     });
 
@@ -90,6 +94,179 @@ describe('authenticated sessions', () => {
     });
 
     expect(response.body.session.absoluteExpiresAt).toBeTypeOf('string');
+  });
+
+  it('accepts a browser extension session through bearer authentication', async () => {
+    const { user, token } = await createAuthenticatedSession('BROWSER_EXTENSION');
+
+    const response = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(200);
+
+    expect(response.body).toMatchObject({
+      user: {
+        id: user.id,
+        email: 'session@example.com',
+      },
+
+      state: 'AUTHENTICATED_LOCKED',
+    });
+  });
+
+  it('rejects a web session presented as a bearer token', async () => {
+    const { token } = await createAuthenticatedSession('WEB');
+
+    const response = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('rejects a browser extension session presented as a cookie', async () => {
+    const { token } = await createAuthenticatedSession('BROWSER_EXTENSION');
+
+    const response = await request(app).get('/api/v1/me').set('Cookie', `pm_session=${token}`);
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+
+    const setCookieHeader = response.headers['set-cookie'];
+
+    expect(setCookieHeader).toBeDefined();
+  });
+
+  it('rejects simultaneous cookie and bearer authentication', async () => {
+    const { token: webToken } = await createAuthenticatedSession('WEB');
+
+    const extensionToken = generateSecurityToken();
+
+    const user = await prisma.user.findUniqueOrThrow({
+      where: {
+        normalizedEmail: 'session@example.com',
+      },
+    });
+
+    const now = new Date();
+
+    await prisma.session.create({
+      data: {
+        userId: user.id,
+
+        tokenHash: Uint8Array.from(hashSecurityToken(extensionToken)),
+
+        clientKind: 'BROWSER_EXTENSION',
+
+        idleExpiresAt: new Date(now.getTime() + SESSION_IDLE_TTL_MS),
+
+        absoluteExpiresAt: new Date(now.getTime() + SESSION_ABSOLUTE_TTL_MS),
+      },
+    });
+
+    const response = await request(app)
+      .get('/api/v1/me')
+      .set('Cookie', `pm_session=${webToken}`)
+      .set('Authorization', `Bearer ${extensionToken}`);
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+
+    /*
+     * Ambiguous credentials must not mutate
+     * either authentication channel.
+     */
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('rejects malformed authorization when a session cookie is also present', async () => {
+    const { token } = await createAuthenticatedSession('WEB');
+
+    const response = await request(app)
+      .get('/api/v1/me')
+      .set('Cookie', `pm_session=${token}`)
+      .set('Authorization', 'Bearer');
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('does not clear the web cookie for an invalid bearer token', async () => {
+    const response = await request(app)
+      .get('/api/v1/me')
+      .set('Authorization', 'Bearer invalid-extension-session');
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('clears an invalid cookie-backed session', async () => {
+    const response = await request(app)
+      .get('/api/v1/me')
+      .set('Cookie', 'pm_session=invalid-web-session');
+
+    expect(response.status).toBe(401);
+
+    const setCookieHeader = response.headers['set-cookie'];
+
+    expect(setCookieHeader).toBeDefined();
+
+    const cookies = Array.isArray(setCookieHeader)
+      ? setCookieHeader.join(';')
+      : (setCookieHeader ?? '');
+
+    expect(cookies).toContain('pm_session=');
+
+    expect(cookies).toContain('Expires=Thu, 01 Jan 1970');
+  });
+
+  it('revokes a browser extension session on logout without clearing a web cookie', async () => {
+    const { session, token } = await createAuthenticatedSession('BROWSER_EXTENSION');
+
+    const response = await request(app)
+      .post('/api/v1/auth/logout')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(204);
+
+    const storedSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: session.id,
+      },
+    });
+
+    expect(storedSession.revokedAt).not.toBeNull();
+
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('revokes a browser extension session on logout without clearing a web cookie', async () => {
+    const { session, token } = await createAuthenticatedSession('BROWSER_EXTENSION');
+
+    const response = await request(app)
+      .post('/api/v1/auth/logout')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(204);
+
+    const storedSession = await prisma.session.findUniqueOrThrow({
+      where: {
+        id: session.id,
+      },
+    });
+
+    expect(storedSession.revokedAt).not.toBeNull();
+
+    expect(response.headers['set-cookie']).toBeUndefined();
   });
 
   it('rejects a request without a session', async () => {
@@ -204,6 +381,7 @@ describe('authenticated sessions', () => {
 
     expect(current).toMatchObject({
       id: currentSession.id,
+      clientKind: 'WEB',
       current: true,
     });
 
@@ -403,6 +581,7 @@ describe('authenticated sessions', () => {
     expect(Object.keys(response.body.sessions[0]).sort()).toEqual(
       [
         'absoluteExpiresAt',
+        'clientKind',
         'createdAt',
         'current',
         'deviceLabel',
@@ -760,5 +939,57 @@ describe('authenticated sessions', () => {
     expect(response.status).toBe(401);
 
     expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+  });
+  it('does not issue a csrf token to a browser extension session', async () => {
+    const { token } = await createAuthenticatedSession('BROWSER_EXTENSION');
+
+    const response = await request(app)
+      .get('/api/v1/auth/csrf')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(401);
+
+    expect(response.body.error.code).toBe('AUTHENTICATION_REQUIRED');
+
+    expect(response.body.csrfToken).toBeUndefined();
+  });
+  it('rejects a revoked browser extension session', async () => {
+    const { session, token } = await createAuthenticatedSession('BROWSER_EXTENSION');
+
+    await prisma.session.update({
+      where: {
+        id: session.id,
+      },
+
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    const response = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(401);
+
+    expect(response.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('rejects an expired browser extension session', async () => {
+    const { session, token } = await createAuthenticatedSession('BROWSER_EXTENSION');
+
+    await prisma.session.update({
+      where: {
+        id: session.id,
+      },
+
+      data: {
+        idleExpiresAt: new Date(Date.now() - 1000),
+      },
+    });
+
+    const response = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${token}`);
+
+    expect(response.status).toBe(401);
+
+    expect(response.headers['set-cookie']).toBeUndefined();
   });
 });

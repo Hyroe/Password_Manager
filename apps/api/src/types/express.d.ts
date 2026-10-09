@@ -7,6 +7,10 @@ declare global {
         sessionId: string;
         userId: string;
         email: string;
+
+        clientKind: 'WEB' | 'BROWSER_EXTENSION';
+        transport: 'COOKIE' | 'BEARER';
+
         absoluteExpiresAt: Date;
       };
     }

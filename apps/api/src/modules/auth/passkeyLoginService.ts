@@ -144,6 +144,8 @@ export async function verifyPasskeyLogin(
 
         tokenHash: sessionTokenHash,
 
+        clientKind: 'WEB',
+
         userAgent: normalizedUserAgent,
 
         idleExpiresAt,

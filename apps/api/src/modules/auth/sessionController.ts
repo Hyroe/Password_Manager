@@ -41,7 +41,9 @@ export async function logout(req: Request, res: Response) {
     await revokeSession(req.auth.sessionId);
   }
 
-  res.clearCookie(sessionCookieName(), sessionCookieClearOptions());
+  if (req.auth?.transport === 'COOKIE') {
+    res.clearCookie(sessionCookieName(), sessionCookieClearOptions());
+  }
 
   res.status(204).end();
 }
@@ -64,6 +66,8 @@ export async function listSessions(req: Request, res: Response) {
   res.status(200).json({
     sessions: sessions.map((session) => ({
       id: session.id,
+
+      clientKind: session.clientKind,
 
       deviceLabel: session.deviceLabel,
 
@@ -122,7 +126,7 @@ export async function revokeSessionRequest(req: Request, res: Response) {
    */
   await revokeUserSession(req.auth.userId, sessionId);
 
-  if (sessionId === req.auth.sessionId) {
+  if (sessionId === req.auth.sessionId && req.auth.transport === 'COOKIE') {
     res.clearCookie(sessionCookieName(), sessionCookieClearOptions());
   }
 

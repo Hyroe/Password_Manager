@@ -10,19 +10,28 @@ export interface ActiveSession {
   sessionId: string;
   userId: string;
   email: string;
+
+  clientKind: 'WEB' | 'BROWSER_EXTENSION';
+
   absoluteExpiresAt: Date;
 }
-
 function tokenHashForPrisma(token: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(hashSecurityToken(token));
 }
 
-export async function resolveSession(sessionToken: string): Promise<ActiveSession | null> {
+type SessionClientKind = 'WEB' | 'BROWSER_EXTENSION';
+
+export async function resolveSession(
+  sessionToken: string,
+  expectedClientKind: SessionClientKind,
+): Promise<ActiveSession | null> {
   const now = new Date();
 
-  const session = await prisma.session.findUnique({
+  const session = await prisma.session.findFirst({
     where: {
       tokenHash: tokenHashForPrisma(sessionToken),
+
+      clientKind: expectedClientKind,
     },
 
     include: {
@@ -78,6 +87,8 @@ export async function resolveSession(sessionToken: string): Promise<ActiveSessio
     userId: session.user.id,
     email: session.user.email,
 
+    clientKind: session.clientKind,
+
     absoluteExpiresAt: session.absoluteExpiresAt,
   };
 }
@@ -97,6 +108,8 @@ export async function revokeSession(sessionId: string): Promise<void> {
 
 export interface ListedSession {
   id: string;
+
+  clientKind: 'WEB' | 'BROWSER_EXTENSION';
 
   createdAt: Date;
   lastSeenAt: Date;
@@ -137,6 +150,7 @@ export async function listActiveSessions(
     select: {
       id: true,
 
+      clientKind: true,
       userAgent: true,
 
       createdAt: true,
@@ -149,6 +163,8 @@ export async function listActiveSessions(
 
   return sessions.map((session) => ({
     id: session.id,
+
+    clientKind: session.clientKind,
 
     createdAt: session.createdAt,
     lastSeenAt: session.lastSeenAt,

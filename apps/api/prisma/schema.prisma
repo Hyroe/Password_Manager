@@ -298,6 +298,11 @@ model RegistrationPasskey {
   @@map("registration_passkeys")
 }
 
+enum SessionClientKind {
+  WEB
+  BROWSER_EXTENSION
+}
+
 model Session {
   id String @id @default(uuid(7)) @db.Uuid
 
@@ -315,6 +320,8 @@ model Session {
   absoluteExpiresAt DateTime @map("absolute_expires_at") @db.Timestamptz(3)
 
   revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  clientKind SessionClientKind @default(WEB) @map("client_kind")
 
   @@index([userId, revokedAt])
   @@index([idleExpiresAt])
